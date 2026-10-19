@@ -1,0 +1,40 @@
+name: Crear Mi APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ develop, main ]
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Preparar archivos del proyecto
+        run: |
+          flutter pub get
+          flutter gen-l10n
+          dart run build_runner build --delete-conflicting-outputs
+
+      - name: Compilar APK
+        run: flutter build apk --debug
+
+      - name: Subir APK listo para descargar
+        uses: actions/upload-artifact@v4
+        with:
+          name: Anx-Reader-Con-Vision-APK
+          path: build/app/outputs/flutter-apk/app-debug.apk

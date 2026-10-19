@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 typedef EpubJavaScriptHandler = FutureOr<dynamic> Function(List<dynamic> args);
 
@@ -32,4 +33,11 @@ abstract class EpubWebViewController {
 
   /// Release or claim native browser keyboard focus (CEF). No-op on InApp.
   Future<void> setBrowserFocus(bool focus);
+
+  /// Capture the currently visible viewport as PNG bytes.
+  ///
+  /// Used as the image source for AI vision OCR on scanned/faxed PDF pages
+  /// that have no selectable text layer. Returns null when the platform does
+  /// not support screenshots (e.g. Linux CEF).
+  Future<Uint8List?> takeScreenshot();
 }

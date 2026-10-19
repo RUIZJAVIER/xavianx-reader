@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:anx_reader/utils/webView/epub_webview_controller.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 class InAppEpubWebViewController implements EpubWebViewController {
@@ -41,4 +44,14 @@ class InAppEpubWebViewController implements EpubWebViewController {
 
   @override
   Future<void> setBrowserFocus(bool focus) async {}
+
+  @override
+  Future<Uint8List?> takeScreenshot() async {
+    try {
+      return await _controller.takeScreenshot();
+    } catch (e) {
+      debugPrint('takeScreenshot failed: $e');
+      return null;
+    }
+  }
 }

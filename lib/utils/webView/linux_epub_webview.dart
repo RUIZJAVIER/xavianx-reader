@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:anx_reader/utils/webView/epub_webview_controller.dart';
 import 'package:flutter/foundation.dart';
@@ -126,6 +127,13 @@ class LinuxEpubWebViewController implements EpubWebViewController {
   @override
   Future<void> setBrowserFocus(bool focus) {
     return _controller.setClientFocus(focus);
+  }
+
+  @override
+  Future<Uint8List?> takeScreenshot() async {
+    // CEF backend does not expose a viewport screenshot API; AI vision OCR
+    // is unavailable on Linux.
+    return null;
   }
 
   Future<void> _handleBridgeMessage(cef.JavascriptMessage message) async {

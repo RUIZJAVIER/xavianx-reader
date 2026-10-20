@@ -130,6 +130,11 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   bool get _isTopOfNavigationStack =>
       ModalRoute.of(context)?.isCurrent ?? false;
 
+  /// PDFs render on a white canvas like Google Drive / Acrobat, independent of
+  /// the EPUB reading theme. This also avoids a dark flash while the WebView
+  /// and PDF.js are still booting.
+  bool get _isPdf => widget.book.fileFullPath.toLowerCase().endsWith('.pdf');
+
   void prevPage() {
     webViewController.execute('''
       if (typeof clearSelection === 'function') { clearSelection(); }
@@ -192,9 +197,9 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
 
   void changeTheme(ReadTheme readTheme) {
     textColor = readTheme.textColor;
-    backgroundColor = readTheme.backgroundColor;
+    backgroundColor = _isPdf ? 'FFFFFF' : readTheme.backgroundColor;
 
-    String bc = convertDartColorToJs(readTheme.backgroundColor);
+    String bc = convertDartColorToJs(backgroundColor!);
     String tc = convertDartColorToJs(readTheme.textColor);
 
     webViewController.execute('''
@@ -788,6 +793,10 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     } else {
       backgroundColor = Prefs().readTheme.backgroundColor;
       textColor = Prefs().readTheme.textColor;
+    }
+    // PDF pages are always white, even with a dark EPUB theme.
+    if (_isPdf) {
+      backgroundColor = 'FFFFFF';
     }
   }
 
@@ -1432,6 +1441,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
       },
       child: Scaffold(
         resizeToAvoidBottomInset: false,
+        backgroundColor: _isPdf ? Colors.white : null,
         body: Stack(
           children: [
             buildWebviewWithIOSWorkaround(context, url, initialCfi),

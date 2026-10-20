@@ -493,85 +493,205 @@ const annotationLayerBuilderCSS = `
 }
 `
 
-const renderPage = async (page, getImageBlob) => {
+// PDF pages are never rasterized to PNG/DataURL for the reader. They are
+// painted straight onto a <canvas> by PDF.js, with a vector text layer on top,
+// and re-rendered at the current zoom/device density when a gesture ends.
+//
+// A 5x zoom on a 3x screen would need a ~9k x 12k backing store (hundreds of
+// MB), which would kill the WebView. These caps keep the longest side at
+// 4096px / 16MP: at 5x that is still at least one physical pixel per displayed
+// pixel (and much more at normal zoom), so text and vectors stay crisp without
+// risking an out-of-memory crash.
+const MAX_CANVAS_DIMENSION = 4096
+const MAX_CANVAS_PIXELS = 16 * 1024 * 1024
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
-    const naturalPdfSize = page.getViewport({ scale: 1 })
-    const naturalPdfRatio = naturalPdfSize.width / naturalPdfSize.height
-    const appRatio = innerWidth / innerHeight
-    const pdfToAppResolutionRatio = appRatio / naturalPdfRatio
+// Browser pinch-zoom (the WebView's native zoom used in paginated mode) scales
+// the whole document without changing any page's CSS layout. That means the
+// canvas itself is magnified too. Listen for the settled visual viewport scale
+// and ask every mounted PDF page to re-render at that density, so releasing the
+// fingers always lands on a sharp page.
+const registerVisualZoom = refresh => {
+    let state = globalThis.__anxPdfVisualZoom
+    if (!state) {
+        state = { listeners: new Set(), scale: 1, timer: 0, installed: false }
+        globalThis.__anxPdfVisualZoom = state
+    }
+    const listener = () => refresh(state.scale)
+    state.listeners.add(listener)
 
-    // Render at the native screen density, with a 2x floor so PDFs stay sharp
-    // on low-DPR WebViews. Cap at 3x to keep memory use reasonable.
-    const hdPixelRatio = Math.min(Math.max(devicePixelRatio || 1, 2), 3)
-    const scale = hdPixelRatio * pdfToAppResolutionRatio
-    const viewport = page.getViewport({ scale })
+    if (!state.installed && typeof window !== 'undefined') {
+        state.installed = true
+        const onViewportChange = () => {
+            const viewport = window.visualViewport
+            const scale = viewport?.scale || 1
+            if (Math.abs(scale - state.scale) < 0.01) return
+            state.scale = scale
+            if (state.timer) clearTimeout(state.timer)
+            // Re-render after the pinch settles, exactly like a native viewer.
+            state.timer = setTimeout(() => {
+                state.timer = 0
+                for (const notify of state.listeners) {
+                    try { notify() } catch (_) {}
+                }
+            }, 160)
+        }
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', onViewportChange)
+            window.visualViewport.addEventListener('scroll', onViewportChange)
+        }
+        window.addEventListener('resize', onViewportChange)
+    }
 
-    const canvas = document.createElement('canvas')
-    canvas.height = Math.max(1, Math.ceil(viewport.height))
-    canvas.width = Math.max(1, Math.ceil(viewport.width))
-    const canvasContext = canvas.getContext('2d')
-    canvasContext.imageSmoothingEnabled = true
-    canvasContext.imageSmoothingQuality = 'high'
-    await page.render({ canvasContext, viewport }).promise
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
-    if (getImageBlob) return blob
+    return () => state.listeners.delete(listener)
+}
 
-    /*
-    // with the SVG backend
-    const operatorList = await page.getOperatorList()
-    const svgGraphics = new pdfjsLib.SVGGraphics(page.commonObjs, page.objs)
-    const svg = await svgGraphics.getSVG(operatorList, viewport)
-    const str = new XMLSerializer().serializeToString(svg)
-    const blob = new Blob([str], { type: 'image/svg+xml' })
-    */
+// Renders one PDF page into the canvas of its already-loaded iframe document
+// and wires lazy, high-density re-rendering for that page.
+const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
+    const canvas = doc.querySelector('canvas.pdf-page-canvas')
+    if (!canvas) return
 
-    const container = document.createElement('div')
-    container.classList.add('textLayer')
-    await pdfjsLib.renderTextLayer({
-        textContentSource: await page.getTextContent(),
-        container, viewport,
-    }).promise
+    let cssScale = 1
+    let visualScale = 1
+    let renderedScale = 0
+    let timer = 0
+    let generation = 0
+    let task = null
+    let destroyed = false
 
-    const div = document.createElement('div')
-    div.classList.add('annotationLayer')
-    await new pdfjsLib.AnnotationLayer({ page, viewport, div }).render({
-        annotations: await page.getAnnotations(),
-        linkService: {
-            getDestinationHash: dest => JSON.stringify(dest),
-            addLinkAttributes: (link, url) => link.href = url,
-        },
+    const schedule = delay => {
+        if (destroyed) return
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => {
+            timer = 0
+            render()
+        }, delay)
+    }
+
+    const iframe = doc.defaultView?.frameElement
+    const isVisible = () => {
+        if (!iframe) return true
+        try {
+            const rect = iframe.getBoundingClientRect()
+            return rect.bottom > 0 && rect.top < window.innerHeight
+                && rect.right > 0 && rect.left < window.innerWidth
+        } catch (_) {
+            return true
+        }
+    }
+
+    const render = async () => {
+        const token = ++generation
+        try {
+            const page = await getPage(index)
+            if (destroyed || token !== generation) return
+
+            const baseViewport = page.getViewport({ scale: 1 })
+            const dpr = (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1
+            // baseScale * zoomLevel * devicePixelRatio. `cssScale` already
+            // contains baseScale * zoomLevel (fixed-layout applies both).
+            let scale = Math.max(cssScale, 0.1)
+                * Math.max(visualScale, 0.1)
+                * dpr
+            const byDimension = Math.min(
+                MAX_CANVAS_DIMENSION / baseViewport.width,
+                MAX_CANVAS_DIMENSION / baseViewport.height)
+            const byArea = Math.sqrt(
+                MAX_CANVAS_PIXELS / (baseViewport.width * baseViewport.height))
+            scale = clamp(scale, 0.1, Math.min(byDimension, byArea))
+
+            // Off-screen neighbours only keep a cheap preview. Full density is
+            // reserved for the page the reader is actually looking at, so
+            // zooming never allocates several giant canvases at once.
+            if (!isVisible()) scale = Math.min(scale, 1.25 * dpr)
+
+            if (canvas.width && Math.abs(scale - renderedScale) < 0.02) return
+
+            const viewport = page.getViewport({ scale })
+            if (task) {
+                try { task.cancel() } catch (_) {}
+                task = null
+            }
+            canvas.width = Math.max(1, Math.floor(viewport.width))
+            canvas.height = Math.max(1, Math.floor(viewport.height))
+
+            // White canvas from the first paint: no black/transparent flash.
+            const canvasContext = canvas.getContext('2d', { alpha: false })
+            canvasContext.fillStyle = '#FFFFFF'
+            canvasContext.fillRect(0, 0, canvas.width, canvas.height)
+            canvasContext.imageSmoothingEnabled = true
+            canvasContext.imageSmoothingQuality = 'high'
+
+            task = page.render({
+                canvasContext,
+                viewport,
+                background: '#FFFFFF',
+            })
+            await task.promise
+            if (token === generation) renderedScale = scale
+        } catch (error) {
+            if (error?.name !== 'RenderingCancelledException')
+                console.warn('PDF page render failed', error)
+        }
+    }
+
+    // The renderer (fixed-layout) assigns `doc.scale` with baseScale * zoom
+    // and then on every pinch update. Re-render only once the value settles.
+    try {
+        const initialScale = Number(doc.scale)
+        if (Number.isFinite(initialScale) && initialScale > 0)
+            cssScale = initialScale
+        Object.defineProperty(doc, 'scale', {
+            configurable: true,
+            get: () => cssScale,
+            set: value => {
+                const next = Number(value) || 1
+                if (Math.abs(next - cssScale) < 0.001) return
+                cssScale = next
+                schedule(140)
+            },
+        })
+    } catch (_) {
+        // A cross-origin page cannot be controlled; it is not expected here.
+    }
+
+    const unregister = registerVisualZoom(scale => {
+        visualScale = scale
+        schedule(160)
     })
 
-    const src = URL.createObjectURL(blob)
-    const url = URL.createObjectURL(new Blob([`
-        <!DOCTYPE html>
-        <meta charset="utf-8">
-        <style>
-        :root {
-            --scale-factor: ${scale};
+    // When a neighbour scrolls into view, upgrade it from preview to full
+    // density.
+    let visibilityObserver = null
+    if (iframe && typeof IntersectionObserver === 'function') {
+        visibilityObserver = new IntersectionObserver(entries => {
+            if (entries.some(entry => entry.isIntersecting)) schedule(0)
+        })
+        try { visibilityObserver.observe(iframe) } catch (_) {}
+    }
+
+    const cleanup = () => {
+        destroyed = true
+        if (timer) clearTimeout(timer)
+        unregister()
+        visibilityObserver?.disconnect()
+        if (task) {
+            try { task.cancel() } catch (_) {}
         }
-        html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-        }
-        body > img {
-            display: block;
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            image-rendering: auto;
-        }
-        ${textLayerBuilderCSS}
-        ${annotationLayerBuilderCSS}
-        </style>
-        <img src="${src}">
-        ${container.outerHTML}
-        ${div.outerHTML}
-    `], { type: 'text/html' }))
-    return url
+    }
+    try {
+        doc.defaultView?.addEventListener('pagehide', cleanup, { once: true })
+        doc.defaultView?.addEventListener('unload', cleanup, { once: true })
+    } catch (_) {}
+
+    // Paint a first frame immediately (white background until PDF.js finishes),
+    // then let the real layout scale replace it with a sharper render.
+    schedule(0)
+
+    // Pre-load only the adjacent pages in the background, as Google Drive does.
+    prefetch(index - 1)
+    prefetch(index + 1)
 }
 
 const makeTOCItem = item => ({
@@ -580,11 +700,28 @@ const makeTOCItem = item => ({
     subitems: item.items.length ? item.items.map(makeTOCItem) : null,
 })
 
+// Cover thumbnail used only while importing a book into the library. The
+// reader itself never rasterizes pages.
+const renderCover = async page => {
+    const viewport = page.getViewport({ scale: 1.5 })
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.ceil(viewport.width))
+    canvas.height = Math.max(1, Math.ceil(viewport.height))
+    const canvasContext = canvas.getContext('2d')
+    canvasContext.fillStyle = '#FFFFFF'
+    canvasContext.fillRect(0, 0, canvas.width, canvas.height)
+    await page.render({
+        canvasContext, viewport, background: '#FFFFFF',
+    }).promise
+    return new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+}
+
 export const makePDF = async file => {
     const data = new Uint8Array(await file.arrayBuffer())
     const pdf = await pdfjsLib.getDocument({ data }).promise
 
     const book = { rendition: { layout: 'pre-paginated' } }
+    book.isPDF = true
 
     const info = (await pdf.getMetadata())?.info
     book.metadata = {
@@ -595,22 +732,143 @@ export const makePDF = async file => {
     const outline = await pdf.getOutline()
     book.toc = outline?.map(makeTOCItem)
 
-    const cache = new Map()
+    // Only metadata is requested up front. Pages are fetched on demand, so a
+    // 500+ page document opens as fast as a 5 page one.
+    const pagePromises = new Map()
+    const textPromises = new Map()
+    const annotationPromises = new Map()
+    const shellPromises = new Map()
+
+    const getPage = index => {
+        if (index < 0 || index >= pdf.numPages)
+            return Promise.reject(new Error('Page out of range'))
+        if (!pagePromises.has(index))
+            pagePromises.set(index, pdf.getPage(index + 1))
+        return pagePromises.get(index)
+    }
+    const getTextContent = index => {
+        if (!textPromises.has(index))
+            textPromises.set(index, getPage(index).then(page => page.getTextContent()))
+        return textPromises.get(index)
+    }
+    const getAnnotations = index => {
+        if (!annotationPromises.has(index))
+            annotationPromises.set(index, getPage(index).then(page => page.getAnnotations()))
+        return annotationPromises.get(index)
+    }
+
+    // Builds the white page shell (canvas + vector text layer + annotations).
+    // Nothing is rasterized here: the canvas is painted later by attachCanvasPage.
+    const buildShell = async index => {
+        const [page, textContent, annotations] = await Promise.all([
+            getPage(index), getTextContent(index), getAnnotations(index),
+        ])
+        const viewport = page.getViewport({ scale: 1 })
+
+        const textLayer = document.createElement('div')
+        textLayer.classList.add('textLayer')
+        textLayer.style.setProperty('--scale-factor', '1')
+        // PDF.js reads `--scale-factor` through getComputedStyle, which only
+        // works reliably for elements attached to the document.
+        const staging = document.createElement('div')
+        staging.style.cssText =
+            'position:absolute;left:-100000px;top:0;visibility:hidden;pointer-events:none;'
+        staging.append(textLayer)
+        document.body.append(staging)
+        try {
+            await pdfjsLib.renderTextLayer({
+                textContentSource: textContent,
+                container: textLayer,
+                viewport,
+            }).promise
+        } finally {
+            staging.remove()
+        }
+
+        const annotationLayer = document.createElement('div')
+        annotationLayer.classList.add('annotationLayer')
+        annotationLayer.style.setProperty('--scale-factor', '1')
+        await new pdfjsLib.AnnotationLayer({
+            page, viewport, div: annotationLayer,
+        }).render({
+            annotations,
+            linkService: {
+                getDestinationHash: dest => JSON.stringify(dest),
+                addLinkAttributes: (link, url) => link.href = url,
+            },
+        })
+
+        const width = viewport.width
+        const height = viewport.height
+        return URL.createObjectURL(new Blob([`
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=${width}, height=${height}">
+            <style>
+            :root {
+                --scale-factor: 1;
+            }
+            html, body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: #FFFFFF;
+            }
+            body > canvas.pdf-page-canvas {
+                display: block;
+                width: 100%;
+                height: 100%;
+                background: #FFFFFF;
+            }
+            ${textLayerBuilderCSS}
+            ${annotationLayerBuilderCSS}
+            </style>
+            </head>
+            <body>
+            <canvas class="pdf-page-canvas"></canvas>
+            ${textLayer.outerHTML}
+            ${annotationLayer.outerHTML}
+            </body>
+            </html>
+        `], { type: 'text/html' }))
+    }
+
+    const getShellUrl = index => {
+        if (!shellPromises.has(index)) {
+            const promise = buildShell(index).catch(error => {
+                shellPromises.delete(index)
+                throw error
+            })
+            shellPromises.set(index, promise)
+        }
+        return shellPromises.get(index)
+    }
+
+    // Background warm-up of the neighbouring pages (never the whole document).
+    const prefetch = index => {
+        if (index < 0 || index >= pdf.numPages) return
+        setTimeout(() => {
+            getShellUrl(index).catch(() => {})
+        }, 80)
+    }
+
+    book.onPageLoad = (doc, index) => attachCanvasPage({
+        doc, index, getPage, prefetch,
+    })
+
     book.sections = Array.from({ length: pdf.numPages }).map((_, i) => ({
         id: i,
-        load: async () => {
-            const cached = cache.get(i)
-            if (cached) return cached
-            const url = await renderPage(await pdf.getPage(i + 1))
-            cache.set(i, url)
-            return url
-        },
+        load: () => getShellUrl(i),
         size: 1000,
     }))
     book.sections[0].pageSpread = 'right'
     // size of a page at scale 1, used to reserve space before it is rendered
     book.getPageSize = async index => {
-        const page = await pdf.getPage(index + 1)
+        const page = await getPage(index)
         const { width, height } = page.getViewport({ scale: 1 })
         return { width, height }
     }
@@ -632,6 +890,6 @@ export const makePDF = async file => {
         return [index, null]
     }
     book.getTOCFragment = doc => doc.documentElement
-    book.getCover = async () => renderPage(await pdf.getPage(1), true)
+    book.getCover = async () => renderCover(await getPage(0))
     return book
 }

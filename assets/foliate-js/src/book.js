@@ -798,6 +798,7 @@ const isFBZ = ({ name, type }) =>
   || name.endsWith('.fb2.zip') || name.endsWith('.fbz')
 
 const getView = async file => {
+  isPdf = false
   let book
   if (file.isDirectory) {
     const loader = await makeDirectoryLoader(file)
@@ -1300,8 +1301,9 @@ class Reader {
     this.setView(this.view)
     await this.view.init({ lastLocation: cfi })
 
-    // set html bg color to grey 
-    document.documentElement.style.backgroundColor = 'grey'
+    // PDF pages sit on a white sheet; everything else keeps the grey backdrop.
+    document.documentElement.style.backgroundColor =
+      this.view.book?.isPDF ? '#FFFFFF' : 'grey'
   }
 
   setView(view) {
@@ -1497,6 +1499,10 @@ class Reader {
     this.#saveOriginalContent()
 
     this.readingFeatures(readingRules)
+
+    // PDFs paint their pages onto a canvas after the iframe has loaded. This
+    // keeps the first paint white and the heavy PDF.js rasterization async.
+    this.view.book?.onPageLoad?.(doc, index)
     
     // Apply code highlighting to newly loaded content
     if (style && style.codeHighlightTheme && style.codeHighlightTheme !== 'off') {

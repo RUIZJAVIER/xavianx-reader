@@ -600,6 +600,9 @@ export class FixedLayout extends HTMLElement {
             return entry
         })
 
+        // PDFs are heavy: keep only the current page and its immediate
+        // neighbours warm instead of a wide 200% prefetch window.
+        const prefetchMargin = this.book?.isPDF ? '100% 0px' : '200% 0px'
         this.#rowObserver = new IntersectionObserver(entries => {
             for (const { target, isIntersecting } of entries) {
                 const index = this.#rows.findIndex(row => row.element === target)
@@ -608,7 +611,7 @@ export class FixedLayout extends HTMLElement {
                 if (isIntersecting) this.#loadRow(row)
                 else if (Math.abs(index - this.#index) > 3) this.#unloadRow(row)
             }
-        }, { root: scroller, rootMargin: '200% 0px' })
+        }, { root: scroller, rootMargin: prefetchMargin })
         for (const row of this.#rows) this.#rowObserver.observe(row.element)
 
         scroller.addEventListener('scroll', this.#onScroll, { passive: true })

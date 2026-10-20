@@ -212,6 +212,10 @@ class ReadingPageState extends ConsumerState<ReadingPage>
   //   }
   // }
 
+  /// PDFs get a white sheet behind the WebView so there is never a black
+  /// frame while PDF.js boots and paints the first page.
+  bool get _isPdfBook => _book.fileFullPath.toLowerCase().endsWith('.pdf');
+
   bool _isEditingText() {
     final focus = FocusManager.instance.primaryFocus;
     final ctx = focus?.context;
@@ -965,15 +969,20 @@ class ReadingPageState extends ConsumerState<ReadingPage>
                             onKeyEvent: _handleReaderKeyEvent,
                             child: Stack(
                               children: [
-                                EpubPlayer(
-                                  key: epubPlayerKey,
-                                  book: _book,
-                                  cfi: widget.cfi,
-                                  showOrHideAppBarAndBottomBar:
-                                      showOrHideAppBarAndBottomBar,
-                                  onLoadEnd: onLoadEnd,
-                                  initialThemes: widget.initialThemes,
-                                  updateParent: updateState,
+                                ColoredBox(
+                                  color: _isPdfBook
+                                      ? Colors.white
+                                      : Colors.transparent,
+                                  child: EpubPlayer(
+                                    key: epubPlayerKey,
+                                    book: _book,
+                                    cfi: widget.cfi,
+                                    showOrHideAppBarAndBottomBar:
+                                        showOrHideAppBarAndBottomBar,
+                                    onLoadEnd: onLoadEnd,
+                                    initialThemes: widget.initialThemes,
+                                    updateParent: updateState,
+                                  ),
                                 ),
                                 if (_isResizingAiChat)
                                   SizedBox.expand(

@@ -265,7 +265,7 @@
   "importCannotGetFilePath": "無法取得檔案路徑",
   "importSuccessRestartApp": "匯入成功，請重新啟動 App。",
   "importFailed": "匯入失敗：{error}",
-  "filePickerFailed": "無法開啟檔案選擇器。Linux 請安裝 zenity 或 kdialog。\n{error}",
+  "filePickerFailed": "無法開啟檔案選擇器。\n{error}",
   "@filePickerFailed": {
     "placeholders": {
       "error": {

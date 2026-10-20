@@ -5,6 +5,7 @@ import 'package:anx_reader/enums/bgimg_type.dart';
 import 'package:anx_reader/models/bgimg.dart';
 import 'package:anx_reader/utils/get_path/get_base_path.dart';
 import 'package:anx_reader/utils/log/common.dart';
+import 'package:anx_reader/utils/pick_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -105,7 +106,7 @@ class Bgimg extends _$Bgimg {
 
   /// Import day image
   Future<void> importImg() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
+    FilePickerResult? result = await AnxFilePicker.pickFiles(
       type: FileType.image,
       allowMultiple: false,
     );
@@ -128,7 +129,7 @@ class Bgimg extends _$Bgimg {
 
   /// Import night version for specified day image
   Future<void> importNightImg(String dayImagePath) async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
+    FilePickerResult? result = await AnxFilePicker.pickFiles(
       type: FileType.image,
       allowMultiple: false,
     );

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/dao/reading_time.dart';
@@ -23,7 +24,9 @@ import 'package:anx_reader/utils/env_var.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/utils/ui/status_bar.dart';
 import 'package:anx_reader/widgets/ai/ai_chat_stream.dart';
+import 'package:anx_reader/widgets/ai/ai_screenshot.dart';
 import 'package:anx_reader/widgets/ai/ai_stream.dart';
+import 'package:anx_reader/widgets/ai/screenshot_crop_page.dart';
 import 'package:anx_reader/widgets/reading_page/notes_widget.dart';
 import 'package:anx_reader/models/reading_time.dart';
 import 'package:anx_reader/widgets/reading_page/progress_widget.dart';
@@ -627,6 +630,7 @@ class ReadingPageState extends ConsumerState<ReadingPage>
   Future<void> showAiChat({
     String? content,
     bool sendImmediate = false,
+    List<Uint8List> images = const <Uint8List>[],
   }) async {
     List<AiQuickPromptChip> quickPrompts = _getAiQuickPromptChips();
 
@@ -669,6 +673,7 @@ class ReadingPageState extends ConsumerState<ReadingPage>
                       initialMessage: content,
                       sendImmediate: sendImmediate,
                       quickPromptChips: quickPrompts,
+                      initialImages: images,
                     ),
                   ),
                 ),
@@ -688,6 +693,7 @@ class ReadingPageState extends ConsumerState<ReadingPage>
                 initialMessage: content,
                 sendImmediate: sendImmediate,
                 quickPromptChips: quickPrompts,
+                initialImages: images,
                 trailing: _buildAiChatTrailing(navigatorKey.currentContext!),
               ),
             ),
@@ -695,6 +701,27 @@ class ReadingPageState extends ConsumerState<ReadingPage>
         );
       });
     }
+  }
+
+  /// Captures the current reading page (optionally cropped to a fragment) and
+  /// opens the AI chat with the image attached for visual analysis.
+  Future<void> _captureForVisualAnalysis() async {
+    final bytes = await AiScreenshot.captureReading();
+    if (!mounted) return;
+    if (bytes == null) {
+      AnxToast.show(L10n.of(context).aiCaptureUnavailable);
+      return;
+    }
+
+    final cropped = await openScreenshotCrop(context, bytes);
+    if (!mounted || cropped == null) return;
+
+    showOrHideAppBarAndBottomBar(false);
+    await showAiChat(
+      content: L10n.of(context).aiVisionAnalyzePrompt,
+      sendImmediate: true,
+      images: <Uint8List>[cropped],
+    );
   }
 
   void updateState() {
@@ -768,6 +795,12 @@ class ReadingPageState extends ConsumerState<ReadingPage>
                     },
                   ),
                   actions: [
+                    if (EnvVar.enableAIFeature)
+                      IconButton(
+                        tooltip: L10n.of(context).aiVisionCaptureScreen,
+                        icon: const Icon(Icons.center_focus_strong),
+                        onPressed: _captureForVisualAnalysis,
+                      ),
                     if (EnvVar.enableAIFeature) aiButton,
                     IconButton(
                       icon: const Icon(Icons.copy),

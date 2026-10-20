@@ -3,11 +3,12 @@ import 'dart:io';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/main.dart';
 import 'package:anx_reader/utils/get_path/get_base_path.dart';
+import 'package:anx_reader/utils/pick_file.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:file_picker/file_picker.dart';
 
 Future<void> importFont() async {
-  FilePickerResult? result = await FilePicker.platform.pickFiles(
+  FilePickerResult? result = await AnxFilePicker.pickFiles(
     type: FileType.custom,
     allowedExtensions: ['ttf', 'otf'],
     allowMultiple: true,

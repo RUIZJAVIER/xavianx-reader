@@ -6,6 +6,7 @@ import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/models/book.dart';
 import 'package:anx_reader/models/book_note.dart';
 import 'package:anx_reader/service/notes/notes_json.dart';
+import 'package:anx_reader/utils/pick_file.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -34,7 +35,7 @@ Future<int?> importNotesJsonForBook(BuildContext context, Book book) async {
   if (confirmedRisk != true) return null;
   if (!context.mounted) return null;
 
-  final result = await FilePicker.platform.pickFiles(
+  final result = await AnxFilePicker.pickFiles(
     type: FileType.custom,
     allowedExtensions: const ['json'],
     withData: true,

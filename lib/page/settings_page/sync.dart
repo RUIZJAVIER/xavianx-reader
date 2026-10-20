@@ -15,6 +15,7 @@ import 'package:anx_reader/utils/get_path/get_temp_dir.dart';
 import 'package:anx_reader/utils/get_path/databases_path.dart';
 import 'package:anx_reader/utils/get_path/get_base_path.dart';
 import 'package:anx_reader/utils/log/common.dart';
+import 'package:anx_reader/utils/pick_file.dart';
 import 'package:anx_reader/utils/sync_test_helper.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/config/shared_preference_provider.dart';
@@ -207,7 +208,7 @@ class _SyncSettingState extends ConsumerState<SyncSetting> {
     AnxLog.info('importData: start');
     if (!mounted) return;
 
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
+    FilePickerResult? result = await AnxFilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['zip'],
     );

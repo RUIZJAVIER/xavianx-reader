@@ -8,12 +8,12 @@ import 'package:anx_reader/providers/storage_info.dart';
 import 'package:anx_reader/utils/get_path/get_base_path.dart';
 import 'package:anx_reader/utils/get_path/storage_migration.dart';
 import 'package:anx_reader/utils/platform_utils.dart';
+import 'package:anx_reader/utils/pick_file.dart';
 import 'package:anx_reader/widgets/common/anx_button.dart';
 import 'package:anx_reader/widgets/delete_confirm.dart';
 import 'package:anx_reader/widgets/settings/settings_section.dart';
 import 'package:anx_reader/widgets/settings/settings_tile.dart';
 import 'package:anx_reader/widgets/settings/settings_title.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -59,7 +59,7 @@ class _StorageSettingsState extends ConsumerState<StorageSettings>
   }
 
   Future<void> _selectNewPath() async {
-    final result = await FilePicker.platform.getDirectoryPath();
+    final result = await AnxFilePicker.getDirectoryPath();
     if (result == null) return;
 
     // Check if directory is empty

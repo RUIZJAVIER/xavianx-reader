@@ -16,6 +16,7 @@ import 'package:anx_reader/service/book.dart';
 import 'package:anx_reader/page/search/search_page.dart';
 import 'package:anx_reader/utils/get_path/get_temp_dir.dart';
 import 'package:anx_reader/utils/color/hash_color.dart';
+import 'package:anx_reader/utils/pick_file.dart';
 import 'package:anx_reader/utils/platform_utils.dart';
 import 'package:anx_reader/utils/log/common.dart';
 import 'package:anx_reader/widgets/bookshelf/book_bottom_sheet.dart';
@@ -77,7 +78,7 @@ class BookshelfPageState extends ConsumerState<BookshelfPage>
   Future<void> _importBook() async {
     FilePickerResult? result;
     try {
-      result = await FilePicker.platform.pickFiles(
+      result = await AnxFilePicker.pickFiles(
         type: FileType.any,
         allowMultiple: true,
       );

@@ -266,7 +266,7 @@
   "importCannotGetFilePath": "无法获取文件路径",
   "importSuccessRestartApp": "导入成功，请重启应用",
   "importFailed": "导入失败: {error}",
-  "filePickerFailed": "无法打开文件选择器。Linux 请安装 zenity 或 kdialog。\n{error}",
+  "filePickerFailed": "无法打开文件选择器。\n{error}",
   "@filePickerFailed": {
     "placeholders": {
       "error": {
@@ -322,6 +322,17 @@
   "aiQuickPromptAnalyzeText": "请分析一下",
   "aiQuickPromptSuggest": "建议",
   "aiQuickPromptSuggestText": "有什么建议？",
+  "aiAttachImage": "附加图片",
+  "aiAttachCaptureReading": "截取阅读界面",
+  "aiAttachChooseImage": "选择图片",
+  "aiCaptureUnavailable": "当前平台不支持截图。",
+  "aiVisionCaptureScreen": "截图进行视觉分析",
+  "aiVisionAnalyzePrompt": "分析这张我正在阅读的截图并为我讲解。",
+  "aiVisionCropTitle": "裁剪要发送的片段",
+  "aiVisionCropHint": "拖动以选择要分析的区域。保持不动则发送整页。",
+  "aiVisionCropReset": "重置",
+  "aiVisionCropUseFull": "整页",
+  "aiVisionCropSend": "分析",
   "settingsReading": "阅读",
   "settingsBookshelf": "书架",
   "settingsBookshelfCover": "封面",

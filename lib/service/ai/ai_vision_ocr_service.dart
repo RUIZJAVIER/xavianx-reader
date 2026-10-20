@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:anx_reader/config/shared_preference_provider.dart';
-import 'package:anx_reader/models/ai_provider.dart';
-import 'package:anx_reader/service/ai/ai_key_rotator.dart';
+import 'package:anx_reader/service/ai/ai_vision_support.dart';
 import 'package:anx_reader/utils/log/common.dart';
 import 'package:http/http.dart' as http;
 
@@ -28,19 +26,6 @@ class AiVisionOcrResult {
   @override
   String toString() => 'AiVisionOcrResult(success: $success, '
       'length: ${text.length}, error: $error)';
-}
-
-/// Resolved AI settings (URL + API key + model) used for one OCR request.
-class _VisionAiConfig {
-  const _VisionAiConfig({
-    required this.url,
-    required this.apiKey,
-    required this.model,
-  });
-
-  final String url;
-  final String apiKey;
-  final String model;
 }
 
 /// Extracts text from a screenshot image using the AI provider configured in
@@ -93,7 +78,7 @@ If the image contains no readable text at all, return an empty string.
       return const AiVisionOcrResult.failure('Empty screenshot');
     }
 
-    final _VisionAiConfig? config = _resolveConfig(providerId);
+    final AiVisionConfig? config = AiVisionSupport.resolveConfig(providerId);
     if (config == null) {
       return const AiVisionOcrResult.failure(
           'No AI provider configured for vision OCR');
@@ -101,7 +86,7 @@ If the image contains no readable text at all, return an empty string.
 
     final Uri endpoint;
     try {
-      endpoint = _resolveEndpoint(config.url);
+      endpoint = AiVisionSupport.resolveEndpoint(config.url);
     } catch (e) {
       return AiVisionOcrResult.failure('Invalid AI provider URL: $e');
     }
@@ -163,121 +148,6 @@ If the image contains no readable text at all, return an empty string.
       AnxLog.severe('Vision OCR request failed: $e');
       return AiVisionOcrResult.failure('AI vision request failed: $e');
     }
-  }
-
-  /// Resolves the AI settings from the new provider system, falling back to
-  /// the legacy `aiConfig_*` storage when no provider is available.
-  _VisionAiConfig? _resolveConfig(String? providerId) {
-    final provider = _pickProvider(providerId);
-    if (provider != null) {
-      final key = AiKeyRotator.getNextKey(provider) ?? provider.currentApiKey;
-      final url = provider.url.trim();
-      final model = provider.model.trim();
-      if (url.isNotEmpty &&
-          model.isNotEmpty &&
-          key != null &&
-          key.trim().isNotEmpty) {
-        return _VisionAiConfig(url: url, apiKey: key.trim(), model: model);
-      }
-    }
-
-    return _resolveLegacyConfig(providerId);
-  }
-
-  AiProvider? _pickProvider(String? providerId) {
-    final rawProviders = Prefs().getAiProviders();
-    if (rawProviders.isEmpty) {
-      return null;
-    }
-
-    List<AiProvider> providers;
-    try {
-      providers = rawProviders
-          .map((json) => AiProvider.fromJson(json as Map<String, dynamic>))
-          .toList();
-    } catch (e) {
-      AnxLog.warning('Vision OCR: failed to parse AI providers: $e');
-      return null;
-    }
-
-    if (providerId != null && providerId.isNotEmpty) {
-      for (final p in providers) {
-        if (p.id == providerId) {
-          return p;
-        }
-      }
-    }
-
-    final selectedId = Prefs().selectedAiService;
-    for (final p in providers) {
-      if (p.id == selectedId && p.enabled) {
-        return p;
-      }
-    }
-
-    for (final p in providers) {
-      if (p.enabled &&
-          AiKeyRotator.hasValidKey(p) &&
-          p.model.trim().isNotEmpty) {
-        return p;
-      }
-    }
-
-    return null;
-  }
-
-  _VisionAiConfig? _resolveLegacyConfig(String? providerId) {
-    final identifier =
-        (providerId != null && providerId.isNotEmpty)
-            ? providerId
-            : Prefs().selectedAiService;
-    final legacy = Prefs().getAiConfig(identifier);
-    if (legacy.isEmpty) {
-      return null;
-    }
-
-    final url = (legacy['url'] ?? '').trim();
-    final apiKey = (legacy['api_key'] ?? '').trim();
-    final model = (legacy['model'] ?? '').trim();
-
-    if (url.isEmpty ||
-        model.isEmpty ||
-        apiKey.isEmpty ||
-        apiKey == 'YOUR_API_KEY') {
-      return null;
-    }
-
-    return _VisionAiConfig(url: url, apiKey: apiKey, model: model);
-  }
-
-  /// Normalizes the stored provider URL into a chat-completions endpoint.
-  ///
-  /// Many providers store the full endpoint (e.g. `.../v1/chat/completions`),
-  /// but some store only the base URL (`.../v1`), so the suffix is appended
-  /// when missing.
-  Uri _resolveEndpoint(String rawUrl) {
-    final trimmed = rawUrl.trim();
-    if (trimmed.isEmpty) {
-      throw ArgumentError('AI provider URL is empty');
-    }
-
-    final uri = Uri.parse(trimmed);
-    final path = uri.path.toLowerCase();
-
-    if (path.endsWith('/chat/completions') ||
-        path.endsWith('/completions') ||
-        path.endsWith('/messages')) {
-      return uri;
-    }
-
-    final sanitizedPath = path.endsWith('/')
-        ? uri.path.substring(0, uri.path.length - 1)
-        : uri.path;
-
-    final suffix = sanitizedPath.endsWith('/v1')
-        ? '/chat/completions'
-        : '/v1/chat/completions';
-    return uri.replace(path: '$sanitizedPath$suffix');
   }
 
   String _parseContent(String body) {

@@ -15,6 +15,7 @@ import 'package:anx_reader/service/convert_to_epub/txt/convert_from_txt.dart';
 import 'package:anx_reader/service/md5_service.dart';
 import 'package:anx_reader/service/book.dart';
 import 'package:anx_reader/utils/get_path/get_base_path.dart';
+import 'package:anx_reader/utils/pick_file.dart';
 import 'package:anx_reader/utils/share_file.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/widgets/bookshelf/book_cover.dart';
@@ -140,7 +141,7 @@ class BookBottomSheet extends ConsumerWidget {
     Future<void> handleReplace(BuildContext context) async {
       FilePickerResult? result;
       try {
-        result = await FilePicker.platform.pickFiles(
+        result = await AnxFilePicker.pickFiles(
           type: FileType.any,
           allowMultiple: false,
         );

@@ -266,7 +266,7 @@
   "importCannotGetFilePath": "Cannot get file path",
   "importSuccessRestartApp": "Import success, please restart the app",
   "importFailed": "Import failed: {error}",
-  "filePickerFailed": "Could not open the file picker. On Linux install zenity or kdialog.\n{error}",
+  "filePickerFailed": "Could not open the file picker.\n{error}",
   "@filePickerFailed": {
     "placeholders": {
       "error": {
@@ -322,6 +322,17 @@
   "aiQuickPromptAnalyzeText": "Please analyze",
   "aiQuickPromptSuggest": "Suggest",
   "aiQuickPromptSuggestText": "Any suggestions?",
+  "aiAttachImage": "Attach image",
+  "aiAttachCaptureReading": "Capture reading screen",
+  "aiAttachChooseImage": "Choose image",
+  "aiCaptureUnavailable": "Screenshots are not available on this platform.",
+  "aiVisionCaptureScreen": "Capture screen for visual analysis",
+  "aiVisionAnalyzePrompt": "Analyze this screenshot of what I am reading and explain it to me.",
+  "aiVisionCropTitle": "Crop the fragment to send",
+  "aiVisionCropHint": "Drag to select the area to analyze. Leave untouched to send the whole page.",
+  "aiVisionCropReset": "Reset",
+  "aiVisionCropUseFull": "Whole page",
+  "aiVisionCropSend": "Analyze",
   "settingsReading": "Reading",
   "settingsBookshelf": "Bookshelf",
   "settingsBookshelfCover": "Book cover",

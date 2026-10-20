@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/enums/hint_key.dart';
@@ -14,7 +16,9 @@ import 'package:anx_reader/service/ai/index.dart';
 import 'package:anx_reader/utils/env_var.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/utils/ai_reasoning_parser.dart';
+import 'package:anx_reader/widgets/ai/ai_screenshot.dart';
 import 'package:anx_reader/widgets/ai/model_picker_dialog.dart';
+import 'package:anx_reader/widgets/ai/screenshot_crop_page.dart';
 import 'package:anx_reader/widgets/ai/tool_step_tile.dart';
 import 'package:anx_reader/widgets/ai/tool_tiles/apply_book_tags_step_tile.dart';
 import 'package:anx_reader/widgets/ai/tool_tiles/mindmap_step_tile.dart';
@@ -38,12 +42,17 @@ class AiChatStream extends ConsumerStatefulWidget {
     this.sendImmediate = false,
     this.quickPromptChips = const [],
     this.trailing,
+    this.initialImages = const <Uint8List>[],
   });
 
   final String? initialMessage;
   final bool sendImmediate;
   final List<AiQuickPromptChip> quickPromptChips;
   final List<Widget>? trailing;
+
+  /// Screenshots to pre-attach to the first message (used by the reader's
+  /// capture button).
+  final List<Uint8List> initialImages;
 
   @override
   ConsumerState<AiChatStream> createState() => AiChatStreamState();
@@ -60,6 +69,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
   late List<String> _suggestedPrompts;
   late List<String> _starterPrompts;
   double _fontSize = 14.0;
+  final List<_PendingAttachment> _pendingAttachments = <_PendingAttachment>[];
 
   List<Map<String, String>> _getQuickPrompts(BuildContext context) {
     return [
@@ -105,6 +115,11 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     ];
     _fontSize = Prefs().aiChatFontSize;
     inputController.text = widget.initialMessage ?? '';
+    if (widget.initialImages.isNotEmpty) {
+      _pendingAttachments.addAll(
+        widget.initialImages.map((bytes) => _PendingAttachment(bytes: bytes)),
+      );
+    }
     _suggestedPrompts = _pickSuggestedPrompts();
     if (widget.sendImmediate) {
       _sendMessage();
@@ -367,8 +382,16 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
       return;
     }
 
-    if (inputController.text.trim().isEmpty) return;
-    final message = inputController.text.trim();
+    final trimmed = inputController.text.trim();
+    final images = <Uint8List>[
+      for (final attachment in _pendingAttachments) attachment.bytes,
+    ];
+    if (trimmed.isEmpty && images.isEmpty) return;
+
+    final message = trimmed.isEmpty
+        ? L10n.of(navigatorKey.currentContext ?? context)
+            .aiVisionAnalyzePrompt
+        : trimmed;
     inputController.clear();
 
     _messageSubscription?.cancel();
@@ -379,12 +402,14 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
           message,
           ref,
           isRegenerate,
+          images: images,
         );
 
     setState(() {
       _messageController = controller;
       _messageStream = controller.stream;
       _isStreaming = true;
+      _pendingAttachments.clear();
     });
 
     _messageSubscription = stream.listen(
@@ -414,6 +439,163 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
         }
       },
       cancelOnError: false,
+    );
+  }
+
+  Future<void> _openAttachMenu() async {
+    final canCapture = AiScreenshot.canCaptureReading;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (canCapture)
+              ListTile(
+                leading: const Icon(Icons.center_focus_strong),
+                title: Text(L10n.of(sheetContext).aiAttachCaptureReading),
+                onTap: () => Navigator.of(sheetContext).pop('capture'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: Text(L10n.of(sheetContext).aiAttachChooseImage),
+              onTap: () => Navigator.of(sheetContext).pop('pick'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (action == null || !mounted) return;
+
+    Uint8List? bytes;
+    if (action == 'capture') {
+      bytes = await AiScreenshot.captureReading();
+      if (bytes == null) {
+        if (mounted) {
+          AnxToast.show(L10n.of(context).aiCaptureUnavailable);
+        }
+        return;
+      }
+      if (!mounted) return;
+      bytes = await openScreenshotCrop(context, bytes);
+    } else {
+      bytes = await AiScreenshot.pickImage();
+    }
+
+    if (bytes == null || !mounted) return;
+    setState(() {
+      _pendingAttachments.add(_PendingAttachment(bytes: bytes!));
+    });
+  }
+
+  Widget _buildPendingAttachments() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (var i = 0; i < _pendingAttachments.length; i++)
+            _buildPendingThumbnail(i),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPendingThumbnail(int index) {
+    final colors = Theme.of(context).colorScheme;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.memory(
+            _pendingAttachments[index].bytes,
+            width: 58,
+            height: 58,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+          ),
+        ),
+        Positioned(
+          right: -6,
+          top: -6,
+          child: GestureDetector(
+            onTap: () {
+              setState(() => _pendingAttachments.removeAt(index));
+            },
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: colors.error,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.close, size: 12, color: colors.onError),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<AiChatAttachment> _attachmentsForMessage(int index) {
+    final attachments = ref.read(aiChatProvider.notifier).currentAttachments;
+    if (attachments.isEmpty) {
+      return const <AiChatAttachment>[];
+    }
+    return attachments
+        .where((attachment) => attachment.messageIndex == index)
+        .toList(growable: false);
+  }
+
+  Widget _buildMessageAttachments(List<AiChatAttachment> attachments) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final attachment in attachments)
+            GestureDetector(
+              onTap: () => _openAttachmentPreview(attachment),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.file(
+                  File(attachment.path),
+                  width: 120,
+                  height: 120,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    width: 120,
+                    height: 120,
+                    color: Theme.of(context).colorScheme.surfaceContainer,
+                    child: const Icon(Icons.broken_image_outlined),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _openAttachmentPreview(AiChatAttachment attachment) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        child: InteractiveViewer(
+          child: Image.file(
+            File(attachment.path),
+            errorBuilder: (_, __, ___) => Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(L10n.of(dialogContext).aiCaptureUnavailable),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -649,6 +831,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                 ),
               ],
             ),
+            if (_pendingAttachments.isNotEmpty) _buildPendingAttachments(),
             SizedBox(height: 4),
             TextField(
               controller: inputController,
@@ -695,9 +878,25 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                     ],
                   ),
                 ),
-                IconButton(
-                  icon: Icon(_isStreaming ? Icons.stop : Icons.send, size: 18),
-                  onPressed: _isStreaming ? _cancelStreaming : _sendMessage,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(
+                        Icons.add_photo_alternate_outlined,
+                        size: 20,
+                      ),
+                      tooltip: L10n.of(context).aiAttachImage,
+                      onPressed: _isStreaming ? null : _openAttachMenu,
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        _isStreaming ? Icons.stop : Icons.send,
+                        size: 18,
+                      ),
+                      onPressed: _isStreaming ? _cancelStreaming : _sendMessage,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -934,6 +1133,8 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     final parsed = parseReasoningContent(content);
     final isLongMessage = content.length > 300;
     final lastAssistantMessage = _getLastAssistantMessage();
+    final attachments =
+        isUser ? _attachmentsForMessage(index) : const <AiChatAttachment>[];
 
     return Padding(
       padding: EdgeInsets.only(
@@ -964,6 +1165,8 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (isUser && attachments.isNotEmpty)
+                    _buildMessageAttachments(attachments),
                   isUser
                       ? _buildCollapsibleText(content, isLongMessage)
                       : _buildAssistantTimeline(parsed, isStreaming),
@@ -1255,4 +1458,11 @@ class _CollapsibleTextState extends State<_CollapsibleText> {
       ],
     );
   }
+}
+
+/// A screenshot waiting to be sent with the next message.
+class _PendingAttachment {
+  _PendingAttachment({required this.bytes});
+
+  final Uint8List bytes;
 }

@@ -19,6 +19,7 @@ import 'package:anx_reader/utils/date/convert_seconds.dart';
 import 'package:anx_reader/utils/get_path/get_base_path.dart';
 import 'package:anx_reader/utils/log/common.dart';
 import 'package:anx_reader/utils/color/hash_color.dart';
+import 'package:anx_reader/utils/pick_file.dart';
 import 'package:anx_reader/widgets/bookshelf/book_cover.dart';
 import 'package:anx_reader/widgets/common/async_skeleton_wrapper.dart';
 import 'package:anx_reader/widgets/common/container/filled_container.dart';
@@ -178,7 +179,7 @@ class _BookDetailState extends ConsumerState<BookDetail> {
 
                   FilePickerResult? result;
                   try {
-                    result = await FilePicker.platform.pickFiles(
+                    result = await AnxFilePicker.pickFiles(
                       type: FileType.image,
                       allowMultiple: false,
                     );

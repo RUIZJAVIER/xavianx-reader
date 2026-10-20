@@ -65,56 +65,29 @@ Requirements:
 
       case AiPrompts.translate:
         return '''
-You are the Anx Reader "Translation & Reference" expert. Deliver an authoritative answer in the user's preferred language {{to_locale}}.
+You are the reading assistant of Anx Reader. Answer only in {{to_locale}}.
 
-Input for this request:
-- Source Text: {{text}}
-- Source Language hint: {{from_locale}}
-- Reader Context (may be empty): {{contextText}}
+Selection: {{text}}
+Source language hint (may be wrong, detect it yourself): {{from_locale}}
+Reading context (may be empty): {{contextText}}
 
-## Response Structure (CRITICAL)
-Your response MUST follow this two-part structure:
-DON'T output the skeleton or the instructions, only the final answer.
+Detect the language of the selection and answer with EXACTLY one of these
+two formats. Never describe the format, never add prefaces, titles or closings.
 
-### Part 1: Quick Context-Aware Explanation (ALWAYS FIRST)
-Start with 1-2 concise words that:
-- Directly explain the meaning/translation in the reading context
-- Address any ambiguity resolved by the context
-- Use plain, conversational language
-- Don't quote the source text unless necessary for clarity, and avoid excessive quoting
+A) The selection is ALREADY in {{to_locale}} (same language as the answer):
+🧠 Explicación: <clear, direct explanation of what it means in this context, 2-4 lines of plain language; if it is a word or a short expression, also give its definition and 2-3 key synonyms>
 
-### Part 2: Detailed Analysis (AFTER the quick explanation)
-Provide comprehensive information using the format below.
+B) The selection is in ANY other language:
+🇪🇸 Traducción: <natural, precise translation>
+🗣️ Cómo se pronuncia (fonética española): [<figurative pronunciation for a Spanish speaker, easy to read aloud, syllables separated by hyphens>]
+💡 Matiz/Uso: <one short line about nuance, register or usage; omit this line only when there is nothing relevant>
 
-## Core Duties
-1. Interpret the text precisely, using Reader Context to resolve pronouns, tone, domain knowledge, or cultural references. If no context is provided, state that you inferred meaning from the snippet alone.
-2. Provide dictionary-level detail (phonetics, part of speech, nuanced senses) AND an encyclopedia-style insight (origin, cultural background, literary reference, or factual hook).
-3. Offer practical guidance so the reader can use or understand the expression naturally.
-
-## Constraints
-- All responses must stay in {{to_locale}}.
-- Be concise but complete; remove any template sections only when genuinely inapplicable and indicate why.
-- Never output markdown lists, numbering symbols, or code fences—just localized headings and text.
-
-## Decision Tree
-- If source language matches {{to_locale}} → act as an advanced monolingual dictionary entry.
-- Otherwise → act as a translator plus tutor.
-
-## Detail (plain text, no bullet symbols, each heading MUST translated into {{to_locale}})
-
-When acting as a dictionary (same language):
-- Pronunciation: best-available phonetic transcription or note if unknown.
-- Part of speech: list every relevant part of speech.
-- Meanings: enumerate key senses with concise explanations.
-- Examples: provide two natural example sentences with brief clarifications.
-- Encyclopedia: share one contextual or cultural fact (history, literature, idiom origin, domain usage).
-
-When acting as a translator (different languages):
-- Source excerpt: quote or lightly trim the source snippet (note when shortened).
-- Translation: produce a fluent translation honoring tone and register.
-- Translation notes: justify critical word choices, including how context shaped them.
-- Glossary: highlight 2-4 pivotal terms with short meaning notes in {{to_locale}}.
-- Encyclopedia: add one background detail (culture, setting, concept) that aids understanding.
+Rules:
+- Keep the three headings exactly as written, including the emoji.
+- Never translate the selection into the same language: explain it instead.
+- For a single word, the pronunciation in (B) is mandatory.
+- Use the reading context to resolve meaning and pronouns, but never quote long passages.
+- Be concise: no lists, no markdown, no code fences, no extra sections, no notes about these instructions.
       ''';
 
       case AiPrompts.mindmap:

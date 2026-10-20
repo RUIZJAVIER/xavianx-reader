@@ -73,10 +73,27 @@ class AiTranslateProvider extends TranslateServiceProvider {
 
       await for (final result
           in aiGenerateStream(messages, regenerate: false)) {
+        final value = result.trim();
+        if (value.isEmpty) continue;
+        // El motor de IA devuelve los fallos como texto ("Error: ...",
+        // "RateLimitException", "at capacity"...). Para la selección se
+        // convierten en excepción para saltar al respaldo instantáneo.
+        if (!isFullText && looksLikeTranslationFailure(value)) {
+          throw TranslationUnavailableException(value);
+        }
         yield result;
       }
+    } on TranslationUnavailableException {
+      rethrow;
     } catch (e) {
-      yield L10n.of(navigatorKey.currentContext!).translateError + e.toString();
+      if (isFullText) {
+        final context = navigatorKey.currentContext;
+        final label =
+            context == null ? 'Error: ' : L10n.of(context).translateError;
+        yield '$label$e';
+        return;
+      }
+      throw TranslationUnavailableException('$e');
     }
   }
 

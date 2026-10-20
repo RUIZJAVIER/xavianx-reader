@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/enums/lang_list.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
-import 'package:anx_reader/service/translate/google_gtx.dart';
 import 'package:anx_reader/service/translate/index.dart';
 import 'package:anx_reader/widgets/common/axis_flex.dart';
 import 'package:flutter/material.dart';
@@ -28,14 +27,20 @@ class TranslationMenu extends StatefulWidget {
 }
 
 class _TranslationMenuState extends State<TranslationMenu> {
-  Stream<String>? _providerStream;
-  Future<String>? _fastFuture;
+  Stream<String>? _stream;
   Timer? _debounceTimer;
   bool _initialized = false;
+
+  LangListEnum _from = LangListEnum.auto;
+  LangListEnum _to = LangListEnum.english;
+  TranslateService _service = TranslateService.bingWeb;
 
   @override
   void initState() {
     super.initState();
+    _from = Prefs().translateFrom;
+    _to = Prefs().translateTo;
+    _service = Prefs().translateService;
     _initializeTranslation();
   }
 
@@ -44,54 +49,52 @@ class _TranslationMenuState extends State<TranslationMenu> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _initialized) return;
 
-      // Debounce: Delay the translation call to ensure context has stopped updating
+      // Debounce: Delay the translation call to ensure context has stopped
+      // updating.
       _debounceTimer?.cancel();
       _debounceTimer = Timer(const Duration(milliseconds: 300), () {
         if (!mounted || _initialized) return;
-
-        final from = Prefs().translateFrom;
-        final to = Prefs().translateTo;
-        final service = Prefs().translateService;
-
-        // Con el motor de IA la saturación (RateLimitException) es frecuente:
-        // se lanza en paralelo el motor rápido de Google para tener una
-        // traducción instantánea y usarla si la IA falla.
-        if (service == TranslateService.ai) {
-          _ensureFastTranslation(from, to);
-        }
-
-        setState(() {
-          _providerStream = service.provider.translateStream(
-            widget.content,
-            from,
-            to,
-            contextText: _effectiveContextText,
-          );
-          _initialized = true;
-        });
+        _startTranslation();
       });
     });
+  }
+
+  void _startTranslation() {
+    final from = Prefs().translateFrom;
+    final to = Prefs().translateTo;
+    final service = Prefs().translateService;
+
+    setState(() {
+      _from = from;
+      _to = to;
+      _service = service;
+      // Los proveedores WebView se dibujan con su propio widget; el resto
+      // usa el flujo inteligente (proveedor configurado + respaldo GTX).
+      _stream = service.isWebView
+          ? null
+          : smartTranslateSelectionStream(
+              widget.content,
+              from: from,
+              to: to,
+              contextText: _effectiveContextText,
+            );
+      _initialized = true;
+    });
+  }
+
+  void _retranslate() {
+    if (!mounted) return;
+    _debounceTimer?.cancel();
+    setState(() {
+      _initialized = false;
+      _stream = null;
+    });
+    _startTranslation();
   }
 
   String? get _effectiveContextText {
     final contextText = widget.contextText?.trim();
     return (contextText == null || contextText.isEmpty) ? null : contextText;
-  }
-
-  /// Motor rápido (Google GTX): se lanza una sola vez y se reutiliza.
-  void _ensureFastTranslation(LangListEnum from, LangListEnum to) {
-    if (_fastFuture != null) return;
-    final future = GoogleGtxTranslateProvider()
-        .translateTextOnly(widget.content, from, to);
-    _fastFuture = future;
-    future.then(
-      (_) {
-        if (mounted) setState(() {});
-      },
-      onError: (Object _) {
-        if (mounted) setState(() {});
-      },
-    );
   }
 
   @override
@@ -122,6 +125,9 @@ class _TranslationMenuState extends State<TranslationMenu> {
                   } else {
                     Prefs().translateTo = lang;
                   }
+                  // El formato del resultado depende del idioma detectado y
+                  // del idioma de destino: se vuelve a traducir.
+                  _retranslate();
                 },
                 child: Text(lang.getNative(context)),
               ),
@@ -147,14 +153,14 @@ class _TranslationMenuState extends State<TranslationMenu> {
     );
   }
 
-  bool _isProviderResultValid(String? value) {
-    if (value == null) return false;
-    final trimmed = value.trim();
-    if (trimmed.isEmpty || trimmed == '...') return false;
-    // El proveedor de IA devuelve el error como texto (RateLimitException...).
-    final errorLabel = L10n.of(context).translateError;
-    if (errorLabel.isNotEmpty && trimmed.startsWith(errorLabel)) return false;
-    return true;
+  Widget _loading() {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 6),
+      child: SizedBox(
+        height: 18,
+        child: Center(child: Text('...')),
+      ),
+    );
   }
 
   Widget _resultBox(String text) {
@@ -162,62 +168,41 @@ class _TranslationMenuState extends State<TranslationMenu> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(text),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            TextButton(
-                onPressed: () =>
-                    Clipboard.setData(ClipboardData(text: text)),
-                child: Text(L10n.of(context).commonCopy)),
-          ],
+        Text(text, style: const TextStyle(fontSize: 14, height: 1.35)),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: () => Clipboard.setData(ClipboardData(text: text)),
+            child: Text(L10n.of(context).commonCopy),
+          ),
         ),
       ],
     );
   }
 
   Widget _buildResult() {
-    final stream = _providerStream;
-    if (stream == null) {
-      return const SizedBox(
-        height: 20,
-        child: Center(child: Text('...')),
+    if (_service.isWebView) {
+      return _service.provider.translate(
+        widget.content,
+        _from,
+        _to,
+        contextText: _effectiveContextText,
       );
     }
+
+    final stream = _stream;
+    if (stream == null) return _loading();
 
     return StreamBuilder<String>(
       stream: stream,
       builder: (context, snapshot) {
-        // El proveedor configurado manda cuando responde bien.
-        if (_isProviderResultValid(snapshot.data)) {
-          return _resultBox(snapshot.data!);
+        final data = snapshot.data;
+        // Nunca se muestran errores de capacidad: el flujo ya cambia a Google
+        // GTX y solo emite contenido válido.
+        if (data != null && !looksLikeTranslationFailure(data)) {
+          return _resultBox(data.trim());
         }
-
-        // Si falla (429, 502, RateLimitException...) se arranca el motor rápido.
-        if (snapshot.hasError && _fastFuture == null) {
-          _ensureFastTranslation(Prefs().translateFrom, Prefs().translateTo);
-        }
-
-        // Si no, se muestra la traducción rápida (Google GTX).
-        return FutureBuilder<String>(
-          future: _fastFuture,
-          builder: (context, fastSnapshot) {
-            if (fastSnapshot.hasData &&
-                fastSnapshot.data!.trim().isNotEmpty) {
-              return _resultBox(fastSnapshot.data!);
-            }
-            if (snapshot.hasError) {
-              return Text(
-                '${L10n.of(context).translateError}${snapshot.error}',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              );
-            }
-            return const SizedBox(
-              height: 20,
-              child: Center(child: Text('...')),
-            );
-          },
-        );
+        return _loading();
       },
     );
   }

@@ -107,7 +107,13 @@ PromptTemplatePayload generatePromptSummaryThePreviousContent(
 PromptTemplatePayload generatePromptTranslate(
     String text, String toLocale, String fromLocale,
     {String? contextText}) {
-  final prompt = Prefs().getAiPrompt(AiPrompts.translate);
+  final stored = Prefs().getAiPrompt(AiPrompts.translate);
+  // Los prompts guardados de versiones anteriores (o personalizados) no
+  // conocen el formato inteligente: se les añade el contrato de salida para
+  // que la tarjeta de traducción se comporte igual para todos los usuarios.
+  final prompt = stored.contains(_smartTranslationMarker)
+      ? stored
+      : '$stored\n\n$_smartTranslationContract';
   final normalized = _normalizePrompt(prompt);
   final template = ChatPromptTemplate.fromPromptMessages([
     HumanChatMessagePromptTemplate.fromTemplate(normalized),
@@ -123,6 +129,20 @@ PromptTemplatePayload generatePromptTranslate(
     identifier: AiPrompts.translate,
   );
 }
+
+/// Marca que identifica los prompts de traducción ya actualizados.
+const String _smartTranslationMarker = 'Explicación';
+
+/// Contrato de salida del traductor inteligente de selecciones.
+const String _smartTranslationContract = '''
+Formato de salida obligatorio (tiene prioridad sobre cualquier formato anterior):
+- Si el fragmento YA está en {{to_locale}}: responde solo con
+🧠 Explicación: <explicación breve, clara y directa en el contexto de lectura; si es una palabra o expresión corta, añade su definición y 2-3 sinónimos clave>
+- Si el fragmento está en otro idioma: responde solo con
+🇪🇸 Traducción: <traducción natural y precisa>
+🗣️ Cómo se pronuncia (fonética española): [<pronunciación figurada para un hispanohablante, fácil de leer en voz alta, con las sílabas separadas por guiones>]
+💡 Matiz/Uso: <una línea breve sobre el matiz o el uso; omítela solo si no aporta nada>
+Mantén los encabezados tal cual, con su emoji. No añadas preámbulos, listas, markdown ni secciones adicionales.''';
 
 PromptTemplatePayload generatePromptFullTextTranslate(
     String text, String toLocale, String fromLocale) {

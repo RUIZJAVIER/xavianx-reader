@@ -237,3 +237,159 @@ Future<String> translateTextOnly(String text,
     contextText: contextText,
   );
 }
+
+// ============================================================================
+// Traducción inteligente de selecciones
+// ============================================================================
+
+/// El proveedor configurado no puede responder (capacidad, cuota, red, …).
+///
+/// Es una señal interna: nunca debe mostrarse al lector, solo provoca el
+/// cambio inmediato al respaldo de Google GTX.
+class TranslationUnavailableException implements Exception {
+  TranslationUnavailableException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'TranslationUnavailableException: $message';
+}
+
+const List<String> _translationFailureMarkers = [
+  'ratelimitexception',
+  'rate limit',
+  'rate_limit',
+  'ratelimit',
+  'too many requests',
+  'at capacity',
+  'quota',
+  'resource_exhausted',
+  'resource exhausted',
+  'overloaded',
+  'timed out',
+  'timeout',
+  'connection error',
+  'network error',
+  'socketexception',
+  'bad gateway',
+  'service unavailable',
+  'gateway timeout',
+  'internal server error',
+];
+
+/// ¿El texto es un error/capacidad en lugar de una traducción válida?
+bool looksLikeTranslationFailure(String? value) {
+  if (value == null) return true;
+  final trimmed = value.trim();
+  if (trimmed.isEmpty || trimmed == '...') return true;
+
+  final lower = trimmed.toLowerCase();
+  if (lower.startsWith('error') || lower.startsWith('exception')) return true;
+
+  // Las respuestas con el formato esperado ya son contenido real: aunque
+  // mencionen palabras como «timeout» no deben descartarse.
+  if (trimmed.contains('Explicación:') || trimmed.contains('Traducción:')) {
+    return false;
+  }
+
+  if (_translationFailureMarkers.any(lower.contains)) return true;
+
+  // Códigos HTTP de capacidad solo cuando el texto parece un mensaje de error.
+  final hasHttpCode = RegExp(r'\b(429|502|503|504)\b').hasMatch(lower);
+  if (hasHttpCode &&
+      (lower.contains('error') ||
+          lower.contains('http') ||
+          lower.contains('status') ||
+          lower.contains('code') ||
+          lower.contains('server') ||
+          lower.contains('rate'))) {
+    return true;
+  }
+  return false;
+}
+
+/// Traduce una selección de forma inteligente y a prueba de errores.
+///
+/// 1. Se lanza el proveedor configurado con un vigilante de [timeout]: si
+///    responde con un error de capacidad (`429`, `502`,
+///    `RateLimitException`, `at capacity`, …) o no emite texto a tiempo, se
+///    cambia en ese mismo instante a [GoogleGtxTranslateProvider].
+/// 2. Google GTX maqueta el resultado según el idioma detectado:
+///    - texto ya en el idioma de destino → explicación / definición;
+///    - texto en otro idioma → traducción + pronunciación figurada en español.
+/// 3. Nunca se emite un mensaje de error en pantalla.
+///
+/// Los proveedores basados en WebView no exponen stream: en ese caso no se
+/// emite nada y la tarjeta muestra directamente su widget.
+Stream<String> smartTranslateSelectionStream(
+  String text, {
+  LangListEnum? from,
+  LangListEnum? to,
+  String? contextText,
+  Duration timeout = const Duration(seconds: 4),
+}) async* {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return;
+
+  final fromLang = from ?? Prefs().translateFrom;
+  final toLang = to ?? Prefs().translateTo;
+  final service = Prefs().translateService;
+
+  // Los proveedores WebView se dibujan con su propio widget.
+  if (service.isWebView) return;
+
+  var emitted = false;
+  var lastEmitted = '';
+  try {
+    final chunks = service.provider
+        .translateStream(
+          trimmed,
+          fromLang,
+          toLang,
+          contextText: contextText,
+        )
+        .timeout(timeout, onTimeout: (sink) {
+      sink.addError(TranslationUnavailableException(
+          'El proveedor no respondió en ${timeout.inSeconds}s'));
+      sink.close();
+    });
+
+    await for (final chunk in chunks) {
+      final value = chunk.trim();
+      // Marcadores de progreso de algunos proveedores.
+      if (value.isEmpty || value == '...') continue;
+      if (looksLikeTranslationFailure(value)) {
+        throw TranslationUnavailableException(value);
+      }
+      emitted = true;
+      lastEmitted = chunk;
+      yield chunk;
+    }
+  } catch (e) {
+    AnxLog.warning('Traducción inteligente: cambio a Google GTX ($e)');
+  }
+
+  // Si el proveedor falló pero ya había escrito una respuesta completa, se
+  // conserva; si era un fragmento corto, GTX la sustituye por una completa.
+  if (emitted && lastEmitted.trim().length >= 120) return;
+
+  // Respaldo instantáneo: Google GTX, sin errores de capacidad.
+  try {
+    final result = await GoogleGtx.smartTranslate(
+      trimmed,
+      targetLanguage: GoogleGtxTranslateProvider().mapLanguageCode(toLang),
+      sourceLanguage: fromLang == LangListEnum.auto
+          ? null
+          : GoogleGtxTranslateProvider().mapLanguageCode(fromLang),
+    );
+    if (result.trim().isNotEmpty) {
+      yield result;
+      return;
+    }
+  } catch (e) {
+    AnxLog.warning('Traducción inteligente: Google GTX también falló ($e)');
+  }
+
+  yield 'No se pudo obtener la traducción. Revisa tu conexión e inténtalo '
+      'de nuevo.';
+}

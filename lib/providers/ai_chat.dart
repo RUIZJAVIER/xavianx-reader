@@ -45,9 +45,28 @@ class AiChat extends _$AiChat {
       _currentSessionId = sessionId;
     }
     _attachments = (attachments ?? _attachments)
-        .where((a) => a.messageIndex < history.length)
+        .where((a) => a.messageIndex <= history.length)
         .toList(growable: false);
     state = AsyncData(history);
+  }
+
+  /// Loads the persisted screenshots attached to [messageIndex].
+  ///
+  /// Used when regenerating an answer: the original human turn is removed from
+  /// the conversation before the new request is built, so the image bytes must
+  /// be recovered from the attachment store and sent again.
+  Future<List<Uint8List>> imagesForMessage(int messageIndex) async {
+    final images = <Uint8List>[];
+    for (final attachment in _attachments) {
+      if (attachment.messageIndex != messageIndex) {
+        continue;
+      }
+      final bytes = await AiVisionAttachments.read(attachment.path);
+      if (bytes != null && bytes.isNotEmpty) {
+        images.add(bytes);
+      }
+    }
+    return images;
   }
 
   Stream<List<ChatMessage>> sendMessageStream(
@@ -76,11 +95,20 @@ class AiChat extends _$AiChat {
     final baseMessages = state.whenOrNull(data: (data) => data) ?? const [];
     final humanIndex = baseMessages.length;
 
+    // On regeneration the human turn is rebuilt from history, so recover its
+    // images from the attachment store instead of relying on the UI handing
+    // them over again.
+    var effectiveImages = images;
+    if (isRegenerate && effectiveImages.isEmpty) {
+      effectiveImages = await imagesForMessage(humanIndex);
+    }
+
     // Persist attached screenshots and bind them to the human message that is
-    // about to be appended, so they survive history reloads.
-    if (images.isNotEmpty) {
+    // about to be appended, so they survive history reloads. When regenerating,
+    // the attachments already exist and must not be duplicated.
+    if (effectiveImages.isNotEmpty && !isRegenerate) {
       final saved = <AiChatAttachment>[];
-      for (final bytes in images) {
+      for (final bytes in effectiveImages) {
         try {
           final path = await AiVisionAttachments.save(bytes);
           saved.add(AiChatAttachment(messageIndex: humanIndex, path: path));
@@ -130,8 +158,8 @@ class AiChat extends _$AiChat {
     try {
       // Screenshots are sent through the multimodal path; text-only messages
       // keep using the agent pipeline.
-      final Stream<String> responseStream = images.isNotEmpty
-          ? _imageResponseStream(messages, images)
+      final Stream<String> responseStream = effectiveImages.isNotEmpty
+          ? _imageResponseStream(messages, effectiveImages)
           : aiGenerateStream(
               messages,
               regenerate: isRegenerate,
@@ -209,7 +237,7 @@ class AiChat extends _$AiChat {
         yield last;
       }
       if (last.isEmpty) {
-        yield 'The model returned no answer for the attached image.';
+        yield 'El modelo no devolvió respuesta para la imagen adjunta.';
       }
     } catch (e) {
       AnxLog.severe('Vision chat failed: $e');

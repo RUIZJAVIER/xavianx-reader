@@ -54,7 +54,9 @@ Rules:
 - When the user asks to extract, transcribe or read text, return the clean text
   in its natural reading order, ignoring stains, shadows, fingers, page numbers
   and scan noise.
-- Answer in the same language the user writes in.
+- Answer in Spanish (español) by default. Only use another language when the
+  user explicitly asks for it. Never include your internal reasoning or
+  chain of thought in the answer.
 ''';
 
   /// Streams the assistant answer, yielding the accumulated text so far.
@@ -174,7 +176,7 @@ Rules:
           parts.add(<String, dynamic>{
             'type': 'image_url',
             'image_url': <String, dynamic>{
-              'url': 'data:image/png;base64,${base64Encode(bytes)}',
+              'url': AiVisionSupport.visionDataUrl(bytes),
             },
           });
         }

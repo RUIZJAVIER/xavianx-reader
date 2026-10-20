@@ -77,25 +77,10 @@ class ParsedToolStep {
 
 ParsedReasoning parseReasoningContent(String content) {
   final timeline = <ParsedReasoningEntry>[];
-  final thinkRegex = RegExp(r'<think>([\s\S]*?)<\/think>');
-  var remaining = content;
-
-  final matches = thinkRegex.allMatches(content).toList(growable: false);
-  if (matches.isNotEmpty) {
-    for (final match in matches) {
-      final inner = match.group(1);
-      if (inner != null && inner.isNotEmpty) {
-        _parseTimeline(
-          inner,
-          timeline,
-          section: ParsedReasoningSection.reasoning,
-        );
-      }
-    }
-    remaining = content.replaceAll(thinkRegex, '');
-  }
-
-  if (remaining.isNotEmpty) {
+  // Reasoning is intentionally discarded: the UI must show only the final
+  // answer, never the model's (usually English) chain of thought.
+  final remaining = _stripReasoningTags(content);
+  if (remaining.trim().isNotEmpty) {
     _parseTimeline(
       remaining,
       timeline,
@@ -104,6 +89,28 @@ ParsedReasoning parseReasoningContent(String content) {
   }
 
   return ParsedReasoning(timeline: timeline);
+}
+
+/// Removes `<think>...</think>` blocks and agent `<think-block .../>` markers.
+String _stripReasoningTags(String content) {
+  var result = content.replaceAll(
+    RegExp(r'<think(?:\s[^>]*)?>[\s\S]*?<\/think\s*>',
+        caseSensitive: false),
+    '',
+  );
+  result = result.replaceAll(
+    RegExp(r'<think-block\b[^>]*/>', caseSensitive: false),
+    '',
+  );
+  result = result.replaceAll(
+    RegExp(r'<think\s*/>', caseSensitive: false),
+    '',
+  );
+  result = result.replaceAll(
+    RegExp(r'<\/?think(?:\s[^>]*)?>', caseSensitive: false),
+    '',
+  );
+  return result;
 }
 
 ReasoningEnvelope splitReasoningEnvelope(String content) {
@@ -140,12 +147,9 @@ String composeReasoningEnvelope({
 }
 
 String chatMessageDisplayContent(ChatMessage message) {
-  if (message is AIChatMessage && message.reasoningContent.isNotEmpty) {
-    return composeReasoningEnvelope(
-      answerContent: message.content,
-      reasoningContent: message.reasoningContent,
-    );
-  }
+  // Do not include `reasoningContent` in the displayed text. Some providers
+  // stream their chain of thought in English; the chat must only show the
+  // final answer.
   return message.contentAsString;
 }
 
@@ -232,6 +236,10 @@ void _parseTimeline(
           section: section,
         ),
       );
+    } else if (tagName == 'think-block') {
+      // Reasoning blocks are hidden entirely.
+      currentIndex = match.end;
+      continue;
     } else {
       final decoded = _decodeAttrValue(attrs, 'text');
       final text = decoded ?? _unescapeAttr(attrs['text'] ?? '');
@@ -240,9 +248,7 @@ void _parseTimeline(
         timeline.add(
           ParsedReasoningEntry.reply(
             text,
-            section: tagName == 'think-block'
-                ? ParsedReasoningSection.reasoning
-                : section,
+            section: section,
           ),
         );
       }

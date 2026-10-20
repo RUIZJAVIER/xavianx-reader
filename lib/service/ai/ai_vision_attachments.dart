@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:anx_reader/service/ai/ai_vision_support.dart';
 import 'package:anx_reader/utils/get_path/get_cache_dir.dart';
 
 /// Stores the screenshots attached to AI chat messages on disk so they can be
@@ -23,14 +24,15 @@ class AiVisionAttachments {
   }
 
   /// Persists [bytes] and returns the absolute file path.
-  static Future<String> save(
-    Uint8List bytes, {
-    String extension = 'png',
-  }) async {
+  ///
+  /// The image is resized/compressed first so history backups and future
+  /// vision requests stay small.
+  static Future<String> save(Uint8List bytes) async {
+    final prepared = AiVisionSupport.prepareImageForVision(bytes);
     final dir = await _folder();
-    final name = 'shot_${DateTime.now().microsecondsSinceEpoch}.$extension';
+    final name = 'shot_${DateTime.now().microsecondsSinceEpoch}.jpg';
     final file = File('${dir.path}${Platform.pathSeparator}$name');
-    await file.writeAsBytes(bytes, flush: true);
+    await file.writeAsBytes(prepared, flush: true);
     return file.path;
   }
 

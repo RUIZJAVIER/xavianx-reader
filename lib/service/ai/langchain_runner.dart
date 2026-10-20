@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:anx_reader/utils/ai_reasoning_parser.dart';
 import 'package:anx_reader/utils/log/common.dart';
 import 'package:langchain/langchain.dart';
 
@@ -18,8 +17,8 @@ class CancelableLangchainRunner {
     required BaseChatModel model,
     required PromptValue prompt,
   }) {
-    String thinkBuffer = '';
     String answerBuffer = '';
+    String lastVisible = '';
     bool reasoningDetected = false;
     bool answerPhaseStarted = false;
 
@@ -29,46 +28,39 @@ class CancelableLangchainRunner {
         final source = model.stream(prompt);
         _subscription = source.listen(
           (event) {
-            final rawChunk = event.output.content;
             final reasoningChunk = event.output.reasoningContent;
-            if (rawChunk.isEmpty && reasoningChunk.isEmpty) {
+            if (reasoningChunk.isNotEmpty) {
+              reasoningDetected = true;
+            }
+
+            final rawChunk = event.output.content;
+            if (rawChunk.isEmpty) {
               return;
             }
 
-            if (reasoningChunk.isNotEmpty) {
+            // Some providers stream their chain of thought through `content`
+            // using a `<think/>` marker. Drop those chunks entirely.
+            if (rawChunk.startsWith(thinkTag)) {
               reasoningDetected = true;
-              thinkBuffer += reasoningChunk;
+              return;
             }
 
-            var contentChunk = rawChunk;
-            if (contentChunk.isNotEmpty && _isThinkChunk(contentChunk)) {
-              reasoningDetected = true;
-              thinkBuffer += _cleanThinkChunk(contentChunk);
-              contentChunk = '';
-            }
-
-            if (contentChunk.isNotEmpty) {
-              if (reasoningDetected && !answerPhaseStarted) {
-                if (contentChunk.trim().isEmpty) {
-                  thinkBuffer += contentChunk;
-                } else {
-                  answerPhaseStarted = true;
-                  answerBuffer += contentChunk;
-                }
-              } else {
-                answerBuffer += contentChunk;
+            if (reasoningDetected && !answerPhaseStarted) {
+              if (rawChunk.trim().isEmpty) {
+                return;
               }
+              answerPhaseStarted = true;
             }
 
-            final aggregated = reasoningDetected
-                ? composeReasoningEnvelope(
-                    answerContent: answerBuffer,
-                    reasoningContent: thinkBuffer.trim(),
-                  )
-                : answerBuffer;
+            answerBuffer += rawChunk;
+            final visible = _visibleAnswer(answerBuffer);
+            if (visible == lastVisible) {
+              return;
+            }
+            lastVisible = visible;
 
             if (!controller.isClosed) {
-              controller.add(aggregated);
+              controller.add(visible);
             }
           },
           onError: (Object error, StackTrace stackTrace) {
@@ -97,6 +89,40 @@ class CancelableLangchainRunner {
     );
 
     return controller.stream;
+  }
+
+  /// Removes `<think>` blocks (including an unclosed block while streaming)
+  /// and stray `<think/>` markers from [raw].
+  String _visibleAnswer(String raw) {
+    var text = raw.replaceAll(
+      RegExp(r'<think(?:\s[^>]*)?>[\s\S]*?<\/think\s*>',
+          caseSensitive: false),
+      '',
+    );
+
+    // While a block is still streaming, hide everything from the opening tag
+    // onwards until the closing tag arrives.
+    final openTag = RegExp(r'<think(?:\s[^>]*)?>', caseSensitive: false)
+        .firstMatch(text);
+    if (openTag != null) {
+      text = text.substring(0, openTag.start);
+    }
+
+    text = text.replaceAll(
+      RegExp(r'<think\s*/>', caseSensitive: false),
+      '',
+    );
+    text = text.replaceAll(
+      RegExp(r'<\/?think(?:\s[^>]*)?>', caseSensitive: false),
+      '',
+    );
+
+    // Do not flash a partial tag at the end of a chunk.
+    final lastLt = text.lastIndexOf('<');
+    if (lastLt >= 0 && !text.substring(lastLt).contains('>')) {
+      text = text.substring(0, lastLt);
+    }
+    return text;
   }
 
   Stream<String> streamAgent({

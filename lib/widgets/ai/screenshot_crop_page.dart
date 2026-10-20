@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:anx_reader/l10n/generated/L10n.dart';
+import 'package:anx_reader/service/ai/ai_vision_support.dart';
 import 'package:flutter/material.dart';
 
 /// Opens a full-screen editor that lets the user crop a fragment out of a
@@ -117,7 +118,11 @@ class _ScreenshotCropPageState extends State<_ScreenshotCropPage> {
 
       final bytes = await _crop(image, src);
       if (!mounted) return;
-      Navigator.of(context).pop(bytes ?? widget.imageBytes);
+      Navigator.of(context).pop(
+        bytes == null
+            ? widget.imageBytes
+            : AiVisionSupport.prepareImageForVision(bytes),
+      );
     } catch (_) {
       if (!mounted) return;
       Navigator.of(context).pop(widget.imageBytes);
@@ -210,6 +215,7 @@ class _ScreenshotCropPageState extends State<_ScreenshotCropPage> {
                 child: Image.memory(
                   widget.imageBytes,
                   fit: BoxFit.fill,
+                  filterQuality: FilterQuality.high,
                   gaplessPlayback: true,
                 ),
               ),

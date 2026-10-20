@@ -113,7 +113,7 @@ class AiChatAttachment {
   const AiChatAttachment({
     required this.messageIndex,
     required this.path,
-    this.mimeType = 'image/png',
+    this.mimeType = 'image/jpeg',
   });
 
   /// Index of the message inside [AiChatHistoryEntry.messages] it belongs to.

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:anx_reader/utils/platform_utils.dart';
@@ -48,7 +49,9 @@ Future<void> main() async {
   }
 
   if (AnxPlatform.isLinux) {
-    await cef.WebviewManager().initialize();
+    // CEF is only needed on Linux desktops and is expensive to boot; do not
+    // block the first frame on it.
+    unawaited(cef.WebviewManager().initialize());
   }
 
   // Check if migration is needed before initializing paths
@@ -57,25 +60,18 @@ Future<void> main() async {
     _needsMigration = _migrationCheckResult?.needsMigration ?? false;
   }
 
-  // If no migration needed, initialize paths normally
+  // Path setup is local and fast (path_provider + mkdir), and the UI needs it
+  // for covers/fonts. Database, audio and the local server are started after
+  // runApp so they never block app launch.
   if (!_needsMigration) {
-    initBasePath();
+    await initBasePath();
     AnxLog.init();
     AnxError.init();
-    await DBHelper().initDB();
   }
 
-  Server().start();
-
-  audioHandler = await AudioService.init(
-    builder: () => TtsHandler(),
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.anx.reader.tts.channel.audio',
-      androidNotificationChannelName: 'ANX Reader TTS',
-      androidNotificationOngoing: true,
-      androidStopForegroundOnPause: true,
-    ),
-  );
+  // A usable handler exists immediately; the platform audio service replaces
+  // it once initialized in the background.
+  audioHandler = TtsHandler();
 
   SmartDialog.config.custom = SmartConfigCustom(
     maskColor: Colors.black.withAlpha(35),
@@ -88,6 +84,55 @@ Future<void> main() async {
       child: MyApp(),
     ),
   );
+
+  // Bind the local book server immediately after scheduling the first frame;
+  // it is fast and the reader needs its port.
+  unawaited(_startLocalServer());
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(_initializeInBackground());
+  });
+}
+
+Future<void> _initializeInBackground() async {
+  // Run independent heavy services concurrently. Each one has a short timeout
+  // and swallows failures so a slow database/audio service cannot keep the app
+  // on a blank screen.
+  unawaited(_openDatabase());
+  unawaited(_initAudioService());
+}
+
+Future<void> _openDatabase() async {
+  try {
+    await DBHelper().initDB().timeout(const Duration(seconds: 20));
+  } catch (e) {
+    AnxLog.warning('Startup: database initialization failed: $e');
+  }
+}
+
+Future<void> _startLocalServer() async {
+  try {
+    await Server().start().timeout(const Duration(seconds: 5));
+  } catch (e) {
+    AnxLog.warning('Startup: local server failed to start: $e');
+  }
+}
+
+Future<void> _initAudioService() async {
+  try {
+    audioHandler = await AudioService.init(
+      builder: () => TtsHandler(),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.anx.reader.tts.channel.audio',
+        androidNotificationChannelName: 'ANX Reader TTS',
+        androidNotificationOngoing: true,
+        androidStopForegroundOnPause: true,
+      ),
+    ).timeout(const Duration(seconds: 8));
+    AnxLog.info('Startup: audio service initialized');
+  } catch (e) {
+    AnxLog.warning('Startup: audio service initialization failed: $e');
+  }
 }
 
 class MyApp extends ConsumerStatefulWidget {
@@ -312,7 +357,7 @@ class _MigrationWrapperState extends State<_MigrationWrapper> {
 
   Future<void> _onMigrationComplete() async {
     // Initialize paths and DB after migration
-    initBasePath();
+    await initBasePath();
     AnxLog.init();
     AnxError.init();
     await DBHelper().initDB();

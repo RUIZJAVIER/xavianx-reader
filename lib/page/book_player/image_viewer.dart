@@ -81,8 +81,9 @@ class _ImageViewerState extends State<ImageViewer> {
             loadingBuilder: (context, event) => const Center(
               child: CircularProgressIndicator(),
             ),
-            minScale: PhotoViewComputedScale.contained * 0.8,
-            maxScale: PhotoViewComputedScale.covered * 3,
+            minScale: PhotoViewComputedScale.contained,
+            maxScale: PhotoViewComputedScale.contained * 4,
+            filterQuality: FilterQuality.high,
           ),
           Positioned.fill(
             child: SafeArea(

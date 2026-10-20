@@ -500,15 +500,20 @@ const renderPage = async (page, getImageBlob) => {
     const appRatio = innerWidth / innerHeight
     const pdfToAppResolutionRatio = appRatio / naturalPdfRatio
 
-    const scale = devicePixelRatio * pdfToAppResolutionRatio
+    // Render at the native screen density, with a 2x floor so PDFs stay sharp
+    // on low-DPR WebViews. Cap at 3x to keep memory use reasonable.
+    const hdPixelRatio = Math.min(Math.max(devicePixelRatio || 1, 2), 3)
+    const scale = hdPixelRatio * pdfToAppResolutionRatio
     const viewport = page.getViewport({ scale })
 
     const canvas = document.createElement('canvas')
-    canvas.height = viewport.height
-    canvas.width = viewport.width
+    canvas.height = Math.max(1, Math.ceil(viewport.height))
+    canvas.width = Math.max(1, Math.ceil(viewport.width))
     const canvasContext = canvas.getContext('2d')
+    canvasContext.imageSmoothingEnabled = true
+    canvasContext.imageSmoothingQuality = 'high'
     await page.render({ canvasContext, viewport }).promise
-    const blob = await new Promise(resolve => canvas.toBlob(resolve))
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
     if (getImageBlob) return blob
 
     /*
@@ -548,6 +553,16 @@ const renderPage = async (page, getImageBlob) => {
         html, body {
             margin: 0;
             padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        body > img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            image-rendering: auto;
         }
         ${textLayerBuilderCSS}
         ${annotationLayerBuilderCSS}

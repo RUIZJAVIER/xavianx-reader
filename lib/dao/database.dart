@@ -100,6 +100,7 @@ CREATE TABLE tb_groups (
 class DBHelper {
   static final DBHelper _instance = DBHelper._internal();
   static Database? _database;
+  static Future<Database>? _opening;
   static bool updatedDB = false;
 
   factory DBHelper() {
@@ -108,13 +109,27 @@ class DBHelper {
 
   DBHelper._internal();
 
-  Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await initDB();
-    return _database!;
+  Future<Database> get database => initDB();
+
+  /// Opens the database at most once, even when several DAOs request it while
+  /// startup initialization is still running in the background.
+  Future<Database> initDB() {
+    final existing = _database;
+    if (existing != null) return Future.value(existing);
+    return _opening ??= _openDatabase();
   }
 
-  Future<Database> initDB() async {
+  Future<Database> _openDatabase() async {
+    try {
+      final db = await _createDatabase();
+      _database = db;
+      return db;
+    } finally {
+      _opening = null;
+    }
+  }
+
+  Future<Database> _createDatabase() async {
     int dbVersion = currentDbVersion;
     switch (AnxPlatform.type) {
       case AnxPlatformEnum.macos:
@@ -154,6 +169,7 @@ class DBHelper {
   }
 
   static Future<void> close() async {
+    _opening = null;
     await _database?.close();
     _database = null;
   }

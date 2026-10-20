@@ -377,15 +377,19 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     });
   }
 
-  void _sendMessage({bool isRegenerate = false}) {
+  void _sendMessage({
+    bool isRegenerate = false,
+    List<Uint8List>? imagesOverride,
+  }) {
     if (_isStreaming) {
       return;
     }
 
     final trimmed = inputController.text.trim();
-    final images = <Uint8List>[
-      for (final attachment in _pendingAttachments) attachment.bytes,
-    ];
+    final images = imagesOverride ??
+        <Uint8List>[
+          for (final attachment in _pendingAttachments) attachment.bytes,
+        ];
     if (trimmed.isEmpty && images.isEmpty) return;
 
     final message = trimmed.isEmpty
@@ -409,7 +413,9 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
       _messageController = controller;
       _messageStream = controller.stream;
       _isStreaming = true;
-      _pendingAttachments.clear();
+      if (!isRegenerate) {
+        _pendingAttachments.clear();
+      }
     });
 
     _messageSubscription = stream.listen(
@@ -516,6 +522,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
             width: 58,
             height: 58,
             fit: BoxFit.cover,
+            filterQuality: FilterQuality.high,
             gaplessPlayback: true,
           ),
         ),
@@ -567,6 +574,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                   width: 120,
                   height: 120,
                   fit: BoxFit.cover,
+                  filterQuality: FilterQuality.high,
                   errorBuilder: (_, __, ___) => Container(
                     width: 120,
                     height: 120,
@@ -589,6 +597,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
         child: InteractiveViewer(
           child: Image.file(
             File(attachment.path),
+            filterQuality: FilterQuality.high,
             errorBuilder: (_, __, ___) => Padding(
               padding: const EdgeInsets.all(24),
               child: Text(L10n.of(dialogContext).aiCaptureUnavailable),
@@ -626,7 +635,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     });
   }
 
-  void _regenerateLastMessage() {
+  Future<void> _regenerateLastMessage() async {
     if (_isStreaming) {
       return;
     }
@@ -638,12 +647,16 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     for (int i = messages.length - 1; i >= 0; i--) {
       final message = messages[i];
       if (message is HumanChatMessage) {
+        final notifier = ref.read(aiChatProvider.notifier);
+        // Keep the screenshots that belonged to this human turn; otherwise a
+        // regenerated vision request would silently become text-only.
+        final images = await notifier.imagesForMessage(i);
+        if (!mounted) return;
+
         final history = messages.take(i).toList(growable: false);
-        ref.read(aiChatProvider.notifier).restore(history);
-        setState(() {
-          inputController.text = message.contentAsString;
-          _sendMessage(isRegenerate: true);
-        });
+        notifier.restore(history);
+        inputController.text = message.contentAsString;
+        _sendMessage(isRegenerate: true, imagesOverride: images);
         break;
       }
     }

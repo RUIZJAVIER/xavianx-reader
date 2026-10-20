@@ -1149,7 +1149,11 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   }
 
   InAppWebViewSettings initialSettings = InAppWebViewSettings(
-    supportZoom: false,
+    // Pinch-to-zoom for EPUB/PDF pages. Zoom controls are hidden so the
+    // reader keeps its clean look; taps still turn pages at 1.0x.
+    supportZoom: true,
+    builtInZoomControls: true,
+    displayZoomControls: false,
     transparentBackground: true,
     isInspectable: kDebugMode,
     useHybridComposition: true,

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:anx_reader/page/reading_page.dart';
+import 'package:anx_reader/service/ai/ai_vision_support.dart';
 import 'package:anx_reader/utils/pick_file.dart';
 import 'package:file_picker/file_picker.dart';
 
@@ -27,7 +28,8 @@ class AiScreenshot {
       if (controller == null) {
         return null;
       }
-      return await controller.takeScreenshot();
+      final bytes = await controller.takeScreenshot();
+      return bytes == null ? null : AiVisionSupport.prepareImageForVision(bytes);
     } catch (_) {
       return null;
     }
@@ -46,12 +48,13 @@ class AiScreenshot {
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes != null) {
-      return bytes;
+      return AiVisionSupport.prepareImageForVision(bytes);
     }
     final path = file.path;
     if (path != null) {
       try {
-        return await File(path).readAsBytes();
+        final picked = await File(path).readAsBytes();
+        return AiVisionSupport.prepareImageForVision(picked);
       } catch (_) {
         return null;
       }

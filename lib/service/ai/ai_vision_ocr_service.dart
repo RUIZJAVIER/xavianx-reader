@@ -91,7 +91,7 @@ If the image contains no readable text at all, return an empty string.
       return AiVisionOcrResult.failure('Invalid AI provider URL: $e');
     }
 
-    final String dataUrl = 'data:image/png;base64,${base64Encode(imageBytes)}';
+    final String dataUrl = AiVisionSupport.visionDataUrl(imageBytes);
 
     final Map<String, dynamic> payload = <String, dynamic>{
       'model': config.model,

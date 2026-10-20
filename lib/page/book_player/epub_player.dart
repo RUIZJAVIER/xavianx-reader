@@ -42,6 +42,7 @@ import 'package:anx_reader/utils/log/common.dart';
 import 'package:anx_reader/utils/webView/epub_webview.dart';
 import 'package:anx_reader/utils/webView/epub_webview_controller.dart';
 import 'package:anx_reader/utils/webView/gererate_url.dart';
+import 'package:anx_reader/utils/webView/page_capture.dart';
 import 'package:anx_reader/utils/webView/webview_console_message.dart';
 import 'package:anx_reader/widgets/bookshelf/book_cover.dart';
 import 'package:anx_reader/widgets/context_menu/context_menu.dart';
@@ -402,7 +403,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     }
 
     try {
-      final Uint8List? bytes = await webViewController.takeScreenshot();
+      final Uint8List? bytes = await captureVisiblePage(webViewController);
       if (bytes == null || bytes.isEmpty) {
         return '';
       }

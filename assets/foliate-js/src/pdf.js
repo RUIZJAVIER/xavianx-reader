@@ -494,17 +494,105 @@ const annotationLayerBuilderCSS = `
 `
 
 // PDF pages are never rasterized to PNG/DataURL for the reader. They are
-// painted straight onto a <canvas> by PDF.js, with a vector text layer on top,
-// and re-rendered at the current zoom/device density when a gesture ends.
+// painted onto a <canvas> by PDF.js, with a vector text layer on top, and
+// re-rendered at the current zoom/device density when a gesture ends.
 //
-// A 5x zoom on a 3x screen would need a ~9k x 12k backing store (hundreds of
-// MB), which would kill the WebView. These caps keep the longest side at
-// 4096px / 16MP: at 5x that is still at least one physical pixel per displayed
-// pixel (and much more at normal zoom), so text and vectors stay crisp without
-// risking an out-of-memory crash.
-const MAX_CANVAS_DIMENSION = 4096
-const MAX_CANVAS_PIXELS = 16 * 1024 * 1024
+// Super high densities would need huge backing stores (a 3.5x zoom on a 3x
+// screen is already ~10x the page size), which would kill the WebView. These
+// caps keep the longest side at 5120px / 18MP, enough for a fully sharp 3.5x
+// zoom on a typical page, without risking an out-of-memory crash.
+const MAX_CANVAS_DIMENSION = 5120
+const MAX_CANVAS_PIXELS = 18 * 1024 * 1024
+// Beyond this the page is already several times the screen size; rendering the
+// whole canvas at that density only costs memory.
+const MAX_RENDER_ZOOM = 3.5
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
+
+// Every mounted PDF page registers its canvas here so the AI screenshot can
+// grab the real pixels of the visible page without going through the native
+// WebView surface (which `RepaintBoundary.toImage()` cannot capture).
+const pdfPageRegistry = new Set()
+
+const captureVisiblePdfPage = () => {
+    const viewport = globalThis.visualViewport
+    const viewLeft = viewport ? viewport.offsetLeft : 0
+    const viewTop = viewport ? viewport.offsetTop : 0
+    const viewRight = viewLeft + (viewport ? viewport.width : window.innerWidth)
+    const viewBottom = viewTop + (viewport ? viewport.height : window.innerHeight)
+
+    let best = null
+    for (const entry of pdfPageRegistry) {
+        const { canvas, iframe } = entry
+        if (!canvas?.width || !iframe?.isConnected) continue
+        let rect
+        try { rect = iframe.getBoundingClientRect() } catch (_) { continue }
+        const left = Math.max(rect.left, viewLeft)
+        const top = Math.max(rect.top, viewTop)
+        const right = Math.min(rect.right, viewRight)
+        const bottom = Math.min(rect.bottom, viewBottom)
+        const area = Math.max(0, right - left) * Math.max(0, bottom - top)
+        if (area > 0 && (!best || area > best.area))
+            best = { canvas, rect, left, top, right, bottom, area }
+    }
+    if (!best) return ''
+
+    const { canvas, rect } = best
+    const scaleX = canvas.width / Math.max(rect.width, 1)
+    const scaleY = canvas.height / Math.max(rect.height, 1)
+
+    // Crop the part of the page that is actually on screen.
+    const sx = clamp((best.left - rect.left) * scaleX, 0, canvas.width - 1)
+    const sy = clamp((best.top - rect.top) * scaleY, 0, canvas.height - 1)
+    const sw = clamp((best.right - best.left) * scaleX, 1, canvas.width - sx)
+    const sh = clamp((best.bottom - best.top) * scaleY, 1, canvas.height - sy)
+
+    // Keep the transfer small; the Flutter side re-compresses for the AI anyway.
+    const ratio = Math.min(1, 2000 / Math.max(sw, sh))
+    const width = Math.max(1, Math.round(sw * ratio))
+    const height = Math.max(1, Math.round(sh * ratio))
+
+    const output = document.createElement('canvas')
+    output.width = width
+    output.height = height
+    const outputContext = output.getContext('2d', { alpha: false })
+    outputContext.fillStyle = '#FFFFFF'
+    outputContext.fillRect(0, 0, width, height)
+    outputContext.imageSmoothingEnabled = true
+    outputContext.imageSmoothingQuality = 'high'
+    outputContext.drawImage(canvas, sx, sy, sw, sh, 0, 0, width, height)
+    return output.toDataURL('image/jpeg', 0.92)
+}
+
+if (typeof window !== 'undefined') {
+    globalThis.anxCaptureVisiblePage = globalThis.anxCaptureVisiblePage
+        || captureVisiblePdfPage
+}
+
+// Optional PDF.js font assets (cMaps + standard fonts). They are wired only
+// when the files are actually shipped, so a build without them never fires
+// failed requests on every page; PDF.js then falls back to system fonts.
+let fontAssetOptionsPromise = null
+const getFontAssetOptions = () => {
+    if (!fontAssetOptionsPromise) {
+        fontAssetOptionsPromise = (async () => {
+            try {
+                const base = new URL('vendor/pdfjs/', import.meta.url)
+                const probe = await fetch(
+                    new URL('standard_fonts/LiberationSans-Regular.ttf', base),
+                    { method: 'HEAD' })
+                if (!probe.ok) return {}
+                return {
+                    cMapUrl: new URL('cmaps/', base).href,
+                    cMapPacked: true,
+                    standardFontDataUrl: new URL('standard_fonts/', base).href,
+                }
+            } catch (_) {
+                return {}
+            }
+        })()
+    }
+    return fontAssetOptionsPromise
+}
 
 // Browser pinch-zoom (the WebView's native zoom used in paginated mode) scales
 // the whole document without changing any page's CSS layout. That means the
@@ -534,7 +622,7 @@ const registerVisualZoom = refresh => {
                 for (const notify of state.listeners) {
                     try { notify() } catch (_) {}
                 }
-            }, 160)
+            }, 120)
         }
         if (window.visualViewport) {
             window.visualViewport.addEventListener('resize', onViewportChange)
@@ -553,6 +641,7 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
     if (!canvas) return
 
     let cssScale = 1
+    let fitScale = 1
     let visualScale = 1
     let renderedScale = 0
     let timer = 0
@@ -570,6 +659,8 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
     }
 
     const iframe = doc.defaultView?.frameElement
+    const registryEntry = { doc, canvas, iframe }
+    pdfPageRegistry.add(registryEntry)
     const isVisible = () => {
         if (!iframe) return true
         try {
@@ -589,11 +680,12 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
 
             const baseViewport = page.getViewport({ scale: 1 })
             const dpr = (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1
-            // baseScale * zoomLevel * devicePixelRatio. `cssScale` already
-            // contains baseScale * zoomLevel (fixed-layout applies both).
-            let scale = Math.max(cssScale, 0.1)
-                * Math.max(visualScale, 0.1)
-                * dpr
+            // `cssScale` is baseScale * zoomLevel (fixed-layout applies both);
+            // the native pinch adds `visualScale` on top. Cap the zoom factor so
+            // a 5x pinch does not allocate a canvas no screen can show.
+            const currentZoom = Math.max(cssScale * visualScale, 0.1)
+            const zoomLimit = Math.max(fitScale, 0.1) * MAX_RENDER_ZOOM
+            let scale = Math.min(currentZoom, zoomLimit) * dpr
             const byDimension = Math.min(
                 MAX_CANVAS_DIMENSION / baseViewport.width,
                 MAX_CANVAS_DIMENSION / baseViewport.height)
@@ -609,27 +701,49 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
             if (canvas.width && Math.abs(scale - renderedScale) < 0.02) return
 
             const viewport = page.getViewport({ scale })
+            const width = Math.max(1, Math.floor(viewport.width))
+            const height = Math.max(1, Math.floor(viewport.height))
             if (task) {
                 try { task.cancel() } catch (_) {}
                 task = null
             }
-            canvas.width = Math.max(1, Math.floor(viewport.width))
-            canvas.height = Math.max(1, Math.floor(viewport.height))
 
+            // Render in the PARENT document. PDF.js registers its FontFaces on
+            // the main document, and a canvas owned by this iframe cannot see
+            // them: it would fall back to generic fonts and draw wrong glyphs
+            // (the □□□ boxes). The finished bitmap is blitted below.
+            const surface = document.createElement('canvas')
+            surface.width = width
+            surface.height = height
+            const surfaceContext = surface.getContext('2d', { alpha: false })
             // White canvas from the first paint: no black/transparent flash.
-            const canvasContext = canvas.getContext('2d', { alpha: false })
-            canvasContext.fillStyle = '#FFFFFF'
-            canvasContext.fillRect(0, 0, canvas.width, canvas.height)
-            canvasContext.imageSmoothingEnabled = true
-            canvasContext.imageSmoothingQuality = 'high'
+            surfaceContext.fillStyle = '#FFFFFF'
+            surfaceContext.fillRect(0, 0, width, height)
+            surfaceContext.imageSmoothingEnabled = true
+            surfaceContext.imageSmoothingQuality = 'high'
 
             task = page.render({
-                canvasContext,
+                canvasContext: surfaceContext,
                 viewport,
+                intent: 'display',
                 background: '#FFFFFF',
             })
             await task.promise
-            if (token === generation) renderedScale = scale
+            if (destroyed || token !== generation) return
+
+            // Same CSS size as before, only the backing store grows, so the
+            // text layer and the page layout stay untouched.
+            canvas.width = width
+            canvas.height = height
+            const canvasContext = canvas.getContext('2d', { alpha: false })
+            canvasContext.fillStyle = '#FFFFFF'
+            canvasContext.fillRect(0, 0, width, height)
+            canvasContext.imageSmoothingEnabled = true
+            canvasContext.imageSmoothingQuality = 'high'
+            canvasContext.drawImage(surface, 0, 0)
+            surface.width = 0
+            surface.height = 0
+            renderedScale = scale
         } catch (error) {
             if (error?.name !== 'RenderingCancelledException')
                 console.warn('PDF page render failed', error)
@@ -640,8 +754,11 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
     // and then on every pinch update. Re-render only once the value settles.
     try {
         const initialScale = Number(doc.scale)
-        if (Number.isFinite(initialScale) && initialScale > 0)
+        if (Number.isFinite(initialScale) && initialScale > 0) {
             cssScale = initialScale
+            // Scale that fits the page on screen (zoom factor 1).
+            fitScale = initialScale
+        }
         Object.defineProperty(doc, 'scale', {
             configurable: true,
             get: () => cssScale,
@@ -649,7 +766,7 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
                 const next = Number(value) || 1
                 if (Math.abs(next - cssScale) < 0.001) return
                 cssScale = next
-                schedule(140)
+                schedule(120)
             },
         })
     } catch (_) {
@@ -658,7 +775,7 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
 
     const unregister = registerVisualZoom(scale => {
         visualScale = scale
-        schedule(160)
+        schedule(120)
     })
 
     // When a neighbour scrolls into view, upgrade it from preview to full
@@ -674,6 +791,7 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
     const cleanup = () => {
         destroyed = true
         if (timer) clearTimeout(timer)
+        pdfPageRegistry.delete(registryEntry)
         unregister()
         visibilityObserver?.disconnect()
         if (task) {
@@ -718,7 +836,14 @@ const renderCover = async page => {
 
 export const makePDF = async file => {
     const data = new Uint8Array(await file.arrayBuffer())
-    const pdf = await pdfjsLib.getDocument({ data }).promise
+    const fontAssets = await getFontAssetOptions()
+    const pdf = await pdfjsLib.getDocument({
+        data,
+        // Embedded fonts go through the FontFace API: that is what draws the
+        // real glyphs instead of empty boxes.
+        disableFontFace: false,
+        ...fontAssets,
+    }).promise
 
     const book = { rendition: { layout: 'pre-paginated' } }
     book.isPDF = true
@@ -826,6 +951,17 @@ export const makePDF = async file => {
             }
             ${textLayerBuilderCSS}
             ${annotationLayerBuilderCSS}
+            /* The text layer is only an invisible hit-test/selection surface:
+               its glyphs must never be painted, otherwise a missing embedded
+               font would draw fallback boxes (□□□) over the canvas. */
+            .textLayer {
+                opacity: 1;
+            }
+            .textLayer :is(span, br) {
+                color: transparent !important;
+                -webkit-text-fill-color: transparent !important;
+                text-shadow: none !important;
+            }
             </style>
             </head>
             <body>

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:anx_reader/page/reading_page.dart';
 import 'package:anx_reader/service/ai/ai_vision_support.dart';
 import 'package:anx_reader/utils/pick_file.dart';
+import 'package:anx_reader/utils/webView/page_capture.dart';
 import 'package:file_picker/file_picker.dart';
 
 /// Helpers used by the AI vision features to obtain screenshot bytes.
@@ -20,15 +21,18 @@ class AiScreenshot {
   }
 
   /// Captures the currently visible reading viewport (the book page rendered in
-  /// the webview) as PNG bytes. Returns null when unavailable (e.g. Linux CEF)
+  /// the webview) as image bytes. Returns null when unavailable (e.g. Linux CEF)
   /// or when no reading page is open.
+  ///
+  /// PDF pages come from the PDF.js `<canvas>` (a native WebView screenshot is
+  /// blank on Android); EPUB and other HTML views use the WebView screenshot.
   static Future<Uint8List?> captureReading() async {
     try {
       final controller = epubPlayerKey.currentState?.webViewController;
       if (controller == null) {
         return null;
       }
-      final bytes = await controller.takeScreenshot();
+      final bytes = await captureVisiblePage(controller);
       return bytes == null ? null : AiVisionSupport.prepareImageForVision(bytes);
     } catch (_) {
       return null;

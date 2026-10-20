@@ -43,27 +43,32 @@ class IconAndText extends StatelessWidget {
       );
     }
 
-    Widget content = SizedBox(
-      width: width,
-      height: height,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          icon,
-          SizedBox(height: compact ? 2 : 4),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Container(
-              constraints: BoxConstraints(maxWidth: compact ? 72 : 96),
-              child: Text(
-                text,
-                style: TextStyle(fontSize: fontSize),
-                textAlign: TextAlign.center,
+    Widget content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            icon,
+            SizedBox(height: compact ? 2 : 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Container(
+                constraints: BoxConstraints(maxWidth: compact ? 72 : 96),
+                child: Text(
+                  text,
+                  style: TextStyle(fontSize: fontSize ?? 11),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
 

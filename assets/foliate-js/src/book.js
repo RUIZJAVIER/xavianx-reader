@@ -10,6 +10,8 @@ const { configure, ZipReader, BlobReader, TextWriter, BlobWriter } =
 const { EPUB } = await import('./epub.js')
 
 var isPdf = false;
+// Módulo del visor PDF (cargado solo cuando el libro es un PDF).
+let pdfModule = null;
 
 const getPosition = (target) => {
   const clamp01 = value => Math.min(Math.max(value, 0), 1);
@@ -255,6 +257,39 @@ const expandRangeForCefHitTest = (range) => {
   return r;
 };
 
+// Extrae el texto de una selección hecha sobre el text layer de un PDF.
+//
+// PDF.js separa cada línea con un <br> y `Range.toString()` no añade ningún
+// separador, así que "JUEGUEN" + "CON" salían pegados ("JUEGUENCON") en las
+// notas, las copias y las traducciones. Aquí se recorre el contenido del rango
+// devolviendo un espacio entre líneas y uniendo las palabras partidas por un
+// guion al final de la línea.
+const getPdfSelectionText = range => {
+    let text = '';
+    try {
+        const fragment = range.cloneContents();
+        const walk = node => {
+            for (const child of node.childNodes) {
+                if (child.nodeType === 3) {
+                    text += child.nodeValue;
+                } else if (child.nodeName === 'BR') {
+                    text += '\n';
+                } else if (child.nodeType === 1) {
+                    walk(child);
+                }
+            }
+        };
+        walk(fragment);
+    } catch (_) {
+        return '';
+    }
+    // Palabra partida por guion: "auto-\nmóvil" -> "automóvil".
+    text = text.replace(/(\p{L})[-‐‑]\s*\n\s*(\p{L})/gu, '$1$2');
+    // El resto de saltos de línea son separadores de palabra.
+    text = text.replace(/\s*\n\s*/g, ' ');
+    return text.replace(/[ \t]{2,}/g, ' ').trim();
+};
+
 const handleSelection = (view, doc, index) => {
   const selection = doc.getSelection();
   let range = getSelectionRange(selection);
@@ -277,7 +312,7 @@ const handleSelection = (view, doc, index) => {
   const cfi = view.getCFI(index, range);
   const lang = 'en-US'
 
-  let text = range.toString();
+  let text = isPdf ? getPdfSelectionText(range) : range.toString();
   if (!text) {
     text = selection.toString();
   }
@@ -823,7 +858,8 @@ const getView = async file => {
   }
   else if (await isPDF(file)) {
     isPdf = true;
-    const { makePDF } = await import('./pdf.js')
+    pdfModule = await import('./pdf.js')
+    const { makePDF } = pdfModule
     book = await makePDF(file)
   }
   else {
@@ -1800,7 +1836,9 @@ class Reader {
   get toc() {
     const sectionFractions = this.view.getSectionFractions()
     const currentHref = this.view.lastLocation?.tocItem?.href.split('#')[0] ?? 'Not Found'
-    let currentChapterIndex = sectionFractions.findIndex(s => s.href === currentHref)
+    // Los PDF usan el id de la sección (número) como href, así que se
+    // comparan siempre como texto.
+    let currentChapterIndex = sectionFractions.findIndex(s => String(s.href) === String(currentHref))
     if (currentChapterIndex === -1) {
       currentChapterIndex = 0;
     }
@@ -1812,8 +1850,8 @@ class Reader {
 
     const getFractionByHref = (href) => {
       if (!href) return 0;
-      href = href.split('#')[0]
-      const section = sectionFractions.find(s => s.href === href)
+      href = String(href).split('#')[0]
+      const section = sectionFractions.find(s => String(s.href) === href)
       return section ? section.fraction : 0
     }
 
@@ -1916,6 +1954,13 @@ const setStyle = (oldStyle) => {
     headingFontSize: style.headingFontSize
   }
   reader.view.renderer.setStyles?.(getCSS(newStyle))
+
+  // En los PDF el renderer no aplica el CSS: el tamaño de fuente funciona
+  // como multiplicador de escala de la página y el color de fondo activa el
+  // filtro de lectura nocturna/sepia.
+  if (isPdf && pdfModule?.applyPdfStyle) {
+    pdfModule.applyPdfStyle(newStyle)
+  }
 
   if (!style.useBookStyles && style.fontColor) {
     fixHeadingColor(style.fontColor)

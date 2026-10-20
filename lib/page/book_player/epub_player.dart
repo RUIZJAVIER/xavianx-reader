@@ -101,6 +101,12 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   late Book book;
   String? backgroundColor;
   String? textColor;
+  /// Color de fondo real del tema (en los PDF difiere del color de pantalla,
+  /// que es blanco: el visor lo usa para el filtro de lectura nocturna/sepia).
+  String? themeBackgroundColor;
+  /// True mientras una página del PDF está ampliada: desactiva el cambio de
+  /// página por zonas de toque para poder explorar la página con calma.
+  bool _pdfZoomed = false;
   Timer? styleTimer;
   String bookmarkCfi = '';
   bool bookmarkExists = false;
@@ -135,6 +141,9 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   /// the EPUB reading theme. This also avoids a dark flash while the WebView
   /// and PDF.js are still booting.
   bool get _isPdf => widget.book.fileFullPath.toLowerCase().endsWith('.pdf');
+
+  /// True when the open book is a PDF (rendered on a canvas).
+  bool get isPdf => _isPdf;
 
   void prevPage() {
     webViewController.execute('''
@@ -198,9 +207,14 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
 
   void changeTheme(ReadTheme readTheme) {
     textColor = readTheme.textColor;
+    themeBackgroundColor = readTheme.backgroundColor;
     backgroundColor = _isPdf ? 'FFFFFF' : readTheme.backgroundColor;
 
-    String bc = convertDartColorToJs(backgroundColor!);
+    // En los PDF la página se muestra siempre sobre blanco, pero el color real
+    // del tema se envía al visor para que aplique el filtro de lectura
+    // nocturna/sepia al canvas (los píxeles que se envían a la IA no cambian).
+    String bc =
+        convertDartColorToJs(_isPdf ? themeBackgroundColor! : backgroundColor!);
     String tc = convertDartColorToJs(readTheme.textColor);
 
     webViewController.execute('''
@@ -756,6 +770,14 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
       }
     }
 
+    // Con la página del PDF ampliada no se cambia de página: el usuario
+    // explora la zona ampliada sin que un toque accidental salte de hoja.
+    if (_isPdf && _pdfZoomed) {
+      if (action == PageTurningType.prev || action == PageTurningType.next) {
+        return;
+      }
+    }
+
     switch (action) {
       case PageTurningType.prev:
         prevPage();
@@ -795,6 +817,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
       backgroundColor = Prefs().readTheme.backgroundColor;
       textColor = Prefs().readTheme.textColor;
     }
+    themeBackgroundColor = backgroundColor;
     // PDF pages are always white, even with a dark EPUB theme.
     if (_isPdf) {
       backgroundColor = 'FFFFFF';
@@ -846,6 +869,17 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
         callback: (args) {
           Map<String, dynamic> location = args[0];
           onClick(location);
+        });
+    controller.addJavaScriptHandler(
+        handlerName: 'onPdfZoom',
+        callback: (args) {
+          final payload = args.isNotEmpty ? args.first : null;
+          final zoomed =
+              payload is Map ? payload['zoomed'] == true : false;
+          if (zoomed == _pdfZoomed) return;
+          setState(() {
+            _pdfZoomed = zoomed;
+          });
         });
     controller.addJavaScriptHandler(
       handlerName: 'onExternalLink',
@@ -1396,7 +1430,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     final generatedUrl = generateUrl(
       url,
       initialCfi,
-      backgroundColor: backgroundColor,
+      backgroundColor: _isPdf ? themeBackgroundColor : backgroundColor,
       textColor: textColor,
       isDarkMode: Theme.of(context).brightness == Brightness.dark,
     );

@@ -7,6 +7,7 @@ import 'package:anx_reader/service/config/config_item.dart';
 import 'package:anx_reader/service/translate/ai.dart';
 import 'package:anx_reader/service/translate/deepl.dart';
 import 'package:anx_reader/service/translate/google_api.dart';
+import 'package:anx_reader/service/translate/google_gtx.dart';
 import 'package:anx_reader/service/translate/microsoft_api.dart';
 import 'package:anx_reader/service/translate/web_view.dart';
 import 'package:anx_reader/utils/env_var.dart';
@@ -19,6 +20,7 @@ enum TranslateService {
   googleWeb,
   microsoftApi,
   googleApi,
+  googleGtx,
   deepl,
   ai;
 
@@ -32,6 +34,8 @@ enum TranslateService {
         return MicrosoftApiTranslateProvider();
       case TranslateService.googleApi:
         return GoogleApiTranslateProvider();
+      case TranslateService.googleGtx:
+        return GoogleGtxTranslateProvider();
       case TranslateService.deepl:
         return DeepLTranslateProvider();
       case TranslateService.ai:

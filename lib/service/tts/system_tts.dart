@@ -6,6 +6,7 @@ import 'package:anx_reader/page/reading_page.dart';
 import 'package:anx_reader/service/tts/base_tts.dart';
 import 'package:anx_reader/service/tts/models/tts_voice.dart';
 import 'package:anx_reader/service/tts/tts_service.dart';
+import 'package:anx_reader/utils/log/common.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,6 +25,9 @@ class SystemTts extends BaseTts {
 
   String? _currentVoiceText;
   static String? _prevVoiceText;
+
+  /// El motor TTS de Android ya está inicializado (evita llamadas de nuevo).
+  bool _androidEngineReady = false;
 
   bool restarting = false;
 
@@ -147,10 +151,6 @@ class SystemTts extends BaseTts {
 
   /// Apply the voice by shortName
   Future<void> _applyVoice(String? voiceShortName) async {
-    if (voiceShortName == null || voiceShortName.isEmpty) {
-      return;
-    }
-
     try {
       // Get all voices to find the matching one
       final voices = await flutterTts.getVoices;
@@ -165,6 +165,14 @@ class SystemTts extends BaseTts {
             });
             return;
           }
+        }
+        // No hay voz guardada: se usa la mejor voz en español disponible.
+        final fallback = _pickSpanishVoice(voices);
+        if (fallback != null) {
+          await flutterTts.setVoice({
+            'name': fallback['name'],
+            'locale': fallback['locale'],
+          });
         }
       }
     } catch (e) {
@@ -212,7 +220,13 @@ class SystemTts extends BaseTts {
     await flutterTts.setPitch(pitch);
 
     // Apply the saved voice model
-    final selectedVoice = SystemTtsProvider().resolveVoice(null);
+    String? selectedVoice;
+    try {
+      selectedVoice = SystemTtsProvider().resolveVoice(null);
+    } catch (_) {
+      // Sin voz seleccionada se usa la voz por defecto del motor.
+      selectedVoice = null;
+    }
     await _applyVoice(selectedVoice);
 
     await flutterTts.speak(_currentVoiceText!);
@@ -300,9 +314,20 @@ class SystemTts extends BaseTts {
       return [];
     }
     try {
+      await _ensureAndroidEngine();
+
       dynamic voices = await flutterTts.getVoices;
+
+      // En Android el motor puede terminar de inicializar tarde: si la lista
+      // viene vacía se reintenta una vez.
+      if ((voices is! List || voices.isEmpty) && isAndroid) {
+        await Future.delayed(const Duration(milliseconds: 600));
+        await _ensureAndroidEngine(force: true);
+        voices = await flutterTts.getVoices;
+      }
+
       if (voices is List) {
-        return voices.map((e) {
+        final list = voices.map((e) {
           final map = Map<String, dynamic>.from(e);
           return TtsVoice(
               shortName: map['name'] ?? '',
@@ -311,11 +336,75 @@ class SystemTts extends BaseTts {
               gender: map['gender']?.toString().toLowerCase() ?? '',
               rawData: map);
         }).toList();
+        return _sortVoices(list);
       }
       return [];
     } catch (e) {
       return [];
     }
+  }
+
+  /// Android solo devuelve las voces cuando el motor TTS está inicializado.
+  Future<void> _ensureAndroidEngine({bool force = false}) async {
+    if (!isAndroid) return;
+    if (_androidEngineReady && !force) return;
+    try {
+      final engine = await flutterTts.getDefaultEngine;
+      if (engine is String && engine.isNotEmpty) {
+        await flutterTts.setEngine(engine);
+      }
+      await flutterTts.setSharedInstance(true);
+    } catch (e) {
+      AnxLog.warning('System TTS engine initialization failed: $e');
+    }
+    _androidEngineReady = true;
+  }
+
+  /// Prioriza las voces en español (es-ES, es-MX, es-US) y el resto por locale.
+  static List<TtsVoice> _sortVoices(List<TtsVoice> voices) {
+    final sorted = [...voices];
+    sorted.sort((a, b) {
+      final priority = _voicePriority(a).compareTo(_voicePriority(b));
+      if (priority != 0) return priority;
+      final locale = a.locale.compareTo(b.locale);
+      if (locale != 0) return locale;
+      return a.name.compareTo(b.name);
+    });
+    return sorted;
+  }
+
+  static const _spanishPriority = ['es-ES', 'es-MX', 'es-US'];
+
+  static int _voicePriority(TtsVoice voice) {
+    final locale = voice.locale;
+    final index = _spanishPriority.indexOf(locale);
+    if (index >= 0) return index;
+    if (locale.toLowerCase().startsWith('es')) return _spanishPriority.length;
+    return _spanishPriority.length + 1;
+  }
+
+  /// Devuelve la mejor voz en español de la lista del motor.
+  static Map<String, dynamic>? _pickSpanishVoice(dynamic voices) {
+    if (voices is! List) return null;
+    Map<String, dynamic>? best;
+    var bestPriority = 1 << 20;
+    for (final voice in voices) {
+      final map = Map<String, dynamic>.from(voice);
+      final locale = (map['locale']?.toString() ?? '').replaceAll('_', '-');
+      final index = _spanishPriority.indexOf(locale);
+      final priority = index >= 0
+          ? index
+          : (locale.toLowerCase().startsWith('es')
+              ? _spanishPriority.length
+              : _spanishPriority.length + 1);
+      if (priority < bestPriority) {
+        bestPriority = priority;
+        best = map;
+      }
+    }
+    if (best == null) return null;
+    if (bestPriority > _spanishPriority.length) return null;
+    return best;
   }
 
   @override

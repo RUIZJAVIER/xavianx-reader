@@ -288,7 +288,10 @@ class StyleWidgetState extends State<StyleWidget> {
   }
 
   Row fontSizeSlider() {
-    bool enabled = !Prefs().useBookStyles;
+    // En los PDF el tamaño de fuente funciona como zoom de la página, así que
+    // el deslizador está disponible aunque se usen los estilos del libro.
+    bool enabled = !Prefs().useBookStyles ||
+        widget.epubPlayerKey.currentState?.isPdf == true;
     return Row(
       children: [
         IconAndText(

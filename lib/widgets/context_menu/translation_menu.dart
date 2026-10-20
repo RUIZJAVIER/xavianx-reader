@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/enums/lang_list.dart';
+import 'package:anx_reader/l10n/generated/L10n.dart';
+import 'package:anx_reader/service/translate/google_gtx.dart';
 import 'package:anx_reader/service/translate/index.dart';
 import 'package:anx_reader/widgets/common/axis_flex.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
-import 'dart:async';
 
 class TranslationMenu extends StatefulWidget {
   const TranslationMenu({
@@ -24,9 +28,10 @@ class TranslationMenu extends StatefulWidget {
 }
 
 class _TranslationMenuState extends State<TranslationMenu> {
-  Widget? _translationWidget;
+  Stream<String>? _providerStream;
+  Future<String>? _fastFuture;
   Timer? _debounceTimer;
-  bool _translationInitialized = false;
+  bool _initialized = false;
 
   @override
   void initState() {
@@ -37,25 +42,52 @@ class _TranslationMenuState extends State<TranslationMenu> {
   void _initializeTranslation() {
     // Use addPostFrameCallback to ensure the UI is rendered first
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _translationInitialized) return;
+      if (!mounted || _initialized) return;
 
       // Debounce: Delay the translation call to ensure context has stopped updating
       _debounceTimer?.cancel();
       _debounceTimer = Timer(const Duration(milliseconds: 300), () {
-        if (!mounted || _translationInitialized) return;
+        if (!mounted || _initialized) return;
+
+        final from = Prefs().translateFrom;
+        final to = Prefs().translateTo;
+        final service = Prefs().translateService;
+
+        // Con el motor de IA la saturación (RateLimitException) es frecuente:
+        // se lanza en paralelo el motor rápido de Google para tener una
+        // traducción instantánea y usarla si la IA falla.
+        if (service == TranslateService.ai) {
+          _ensureFastTranslation(from, to);
+        }
 
         setState(() {
-          final effectiveContextText =
-              (widget.contextText?.trim().isEmpty ?? true)
-                  ? null
-                  : widget.contextText;
-          _translationWidget = translateText(
+          _providerStream = service.provider.translateStream(
             widget.content,
-            contextText: effectiveContextText,
+            from,
+            to,
+            contextText: _effectiveContextText,
           );
-          _translationInitialized = true;
+          _initialized = true;
         });
       });
+    });
+  }
+
+  String? get _effectiveContextText {
+    final contextText = widget.contextText?.trim();
+    return (contextText == null || contextText.isEmpty) ? null : contextText;
+  }
+
+  /// Motor rápido (Google GTX): se lanza una sola vez y se reutiliza.
+  void _ensureFastTranslation(LangListEnum from, LangListEnum to) {
+    if (_fastFuture != null) return;
+    final future = GoogleGtxTranslateProvider()
+        .translateTextOnly(widget.content, from, to);
+    _fastFuture = future;
+    future.then((_) {
+      if (mounted) setState(() {});
+    }).catchError((_) {
+      if (mounted) setState(() {});
     });
   }
 
@@ -112,9 +144,83 @@ class _TranslationMenuState extends State<TranslationMenu> {
     );
   }
 
+  bool _isProviderResultValid(String? value) {
+    if (value == null) return false;
+    final trimmed = value.trim();
+    if (trimmed.isEmpty || trimmed == '...') return false;
+    // El proveedor de IA devuelve el error como texto (RateLimitException...).
+    final errorLabel = L10n.of(context).translateError;
+    if (errorLabel.isNotEmpty && trimmed.startsWith(errorLabel)) return false;
+    return true;
+  }
+
+  Widget _resultBox(String text) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(text),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            TextButton(
+                onPressed: () =>
+                    Clipboard.setData(ClipboardData(text: text)),
+                child: Text(L10n.of(context).commonCopy)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildResult() {
+    final stream = _providerStream;
+    if (stream == null) {
+      return const SizedBox(
+        height: 20,
+        child: Center(child: Text('...')),
+      );
+    }
+
+    return StreamBuilder<String>(
+      stream: stream,
+      builder: (context, snapshot) {
+        // El proveedor configurado manda cuando responde bien.
+        if (_isProviderResultValid(snapshot.data)) {
+          return _resultBox(snapshot.data!);
+        }
+
+        // Si falla (429, 502, RateLimitException...) se arranca el motor rápido.
+        if (snapshot.hasError && _fastFuture == null) {
+          _ensureFastTranslation(Prefs().translateFrom, Prefs().translateTo);
+        }
+
+        // Si no, se muestra la traducción rápida (Google GTX).
+        return FutureBuilder<String>(
+          future: _fastFuture,
+          builder: (context, fastSnapshot) {
+            if (fastSnapshot.hasData &&
+                fastSnapshot.data!.trim().isNotEmpty) {
+              return _resultBox(fastSnapshot.data!);
+            }
+            if (snapshot.hasError) {
+              return Text(
+                '${L10n.of(context).translateError}${snapshot.error}',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              );
+            }
+            return const SizedBox(
+              height: 20,
+              child: Center(child: Text('...')),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // print('Building TranslationMenu');
     return Expanded(
       child: AnimatedSize(
         duration: const Duration(milliseconds: 300),
@@ -141,12 +247,7 @@ class _TranslationMenuState extends State<TranslationMenu> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Show translation widget if initialized, otherwise show loading placeholder
-                    _translationWidget ??
-                        const SizedBox(
-                          height: 20,
-                          child: Center(child: Text('...')),
-                        ),
+                    _buildResult(),
                     const Divider(),
                     AxisFlex(
                       mainAxisSize: MainAxisSize.min,

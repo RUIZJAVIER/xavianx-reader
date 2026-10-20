@@ -506,7 +506,56 @@ const MAX_CANVAS_PIXELS = 18 * 1024 * 1024
 // Beyond this the page is already several times the screen size; rendering the
 // whole canvas at that density only costs memory.
 const MAX_RENDER_ZOOM = 3.5
+// El tamaño de fuente por defecto (BookStyle.fontSize) es 1.4: el deslizador
+// actúa como multiplicador de escala a partir de ese valor.
+const PDF_DEFAULT_FONT_SIZE = 1.4
+// Cuánto se puede ampliar la página al recortar los márgenes de imprenta.
+const MAX_CROP_SCALE = 1.45
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
+
+// Marca en la ventana principal que hay una página ampliada. El visor usa
+// esta bandera para bloquear el gesto de cambio de página por swipe.
+const setPdfZoomed = zoomed => {
+    try {
+        window.__anxPdfZoomed = !!zoomed
+        if (window.flutter_inappwebview?.callHandler) {
+            window.flutter_inappwebview.callHandler('onPdfZoom', { zoomed: !!zoomed })
+        }
+    } catch (_) {}
+}
+
+// Estado global del visor PDF:
+//  - zoom: multiplicador de escala (deslizador de tamaño de fuente)
+//  - filter: filtro CSS de lectura nocturna/sepia
+const pdfState = {
+    zoom: 1,
+    filter: 'none',
+}
+
+// Páginas PDF montadas, para poder aplicarles los cambios de estilo.
+const pdfPageControllers = new Set()
+
+// Calcula el filtro de lectura a partir del color de fondo del tema.
+// El filtro se aplica por CSS, así que los píxeles del canvas (y por tanto la
+// captura que se envía a la IA) siguen siendo los originales.
+const computeReadingFilter = backgroundColor => {
+    const match = /^#?([0-9a-f]{6})/i.exec(String(backgroundColor || '').trim())
+    if (!match) return 'none'
+    const hex = match[1]
+    const r = parseInt(hex.slice(0, 2), 16)
+    const g = parseInt(hex.slice(2, 4), 16)
+    const b = parseInt(hex.slice(4, 6), 16)
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    if (luminance < 0.25) {
+        // Modo nocturno: invierte la página manteniendo el tono de la tinta.
+        return 'invert(0.92) hue-rotate(180deg) brightness(0.92) contrast(0.95)'
+    }
+    if (r > g && g > b && r - b > 12) {
+        // Modo sepia.
+        return 'sepia(0.35) contrast(0.96) saturate(0.9)'
+    }
+    return 'none'
+}
 
 // Every mounted PDF page registers its canvas here so the AI screenshot can
 // grab the real pixels of the visible page without going through the native
@@ -640,6 +689,9 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
     const canvas = doc.querySelector('canvas.pdf-page-canvas')
     if (!canvas) return
 
+    const textLayer = doc.querySelector('.textLayer')
+    const annotationLayer = doc.querySelector('.annotationLayer')
+
     let cssScale = 1
     let fitScale = 1
     let visualScale = 1
@@ -648,6 +700,16 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
     let generation = 0
     let task = null
     let destroyed = false
+
+    // Geometría de la página (en unidades PDF) y estado visual.
+    let pageWidth = 0
+    let pageHeight = 0
+    // Margenes de imprenta detectados: { left, top, right, bottom } en fracción.
+    let contentBox = null
+    let cropScale = 1
+    let tapZoom = 1
+    let tapOffsetX = 0
+    let tapOffsetY = 0
 
     const schedule = delay => {
         if (destroyed) return
@@ -661,6 +723,66 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
     const iframe = doc.defaultView?.frameElement
     const registryEntry = { doc, canvas, iframe }
     pdfPageRegistry.add(registryEntry)
+
+    // Escala total aplicada sobre la página: recorte + tamaño de fuente +
+    // zoom por doble toque.
+    const displayScale = () => cropScale * pdfState.zoom * tapZoom
+
+    // Desplazamiento que centra el contenido y mantiene fijo el punto del
+    // doble toque.
+    const transformFor = () => {
+        const s = displayScale()
+        const x0 = contentBox ? contentBox.left * pageWidth : 0
+        const y0 = contentBox ? contentBox.top * pageHeight : 0
+        const x1 = contentBox ? contentBox.right * pageWidth : pageWidth
+        const y1 = contentBox ? contentBox.bottom * pageHeight : pageHeight
+        return {
+            x: (pageWidth - (x1 - x0) * s) / 2 - x0 * s + tapOffsetX,
+            y: (pageHeight - (y1 - y0) * s) / 2 - y0 * s + tapOffsetY,
+            s,
+        }
+    }
+
+    // Aplica el filtro de lectura y la escala/recorte visual. El canvas, la
+    // capa de texto y la de anotaciones se transforman igual para que la
+    // selección siga alineada con lo que se ve.
+    const applyVisualState = () => {
+        const root = doc.documentElement
+        if (root) {
+            root.style.setProperty('--pdf-filter', pdfState.filter || 'none')
+        }
+        if (!pageWidth) return
+        const { x, y, s } = transformFor()
+        const transform = `translate(${x}px, ${y}px) scale(${s})`
+        for (const element of [canvas, textLayer, annotationLayer]) {
+            if (!element) continue
+            element.style.transformOrigin = '0 0'
+            element.style.transform = transform
+        }
+    }
+
+    const controller = {
+        doc, canvas, iframe,
+        refresh: () => {
+            applyVisualState()
+            updateZoomState()
+            schedule(0)
+        },
+    }
+    pdfPageControllers.add(controller)
+
+    // Nivel de zoom real del usuario (sin contar el recorte automático de
+    // márgenes): a partir de 1.05x la página está ampliada.
+    const isZoomed = () => tapZoom * pdfState.zoom * visualScale > 1.05
+
+    let zoomed = false
+    const updateZoomState = () => {
+        const next = isZoomed()
+        if (next === zoomed) return
+        zoomed = next
+        setPdfZoomed(next)
+    }
+
     const isVisible = () => {
         if (!iframe) return true
         try {
@@ -672,6 +794,55 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
         }
     }
 
+    // Detecta los márgenes blancos de imprenta analyzing el bitmap renderizado.
+    const analyzeContentBox = surface => {
+        const width = 160
+        const height = Math.max(1, Math.round(surface.height * width / surface.width))
+        const probe = document.createElement('canvas')
+        probe.width = width
+        probe.height = height
+        const probeContext = probe.getContext('2d', { willReadFrequently: true })
+        probeContext.fillStyle = '#FFFFFF'
+        probeContext.fillRect(0, 0, width, height)
+        probeContext.drawImage(surface, 0, 0, width, height)
+        let data
+        try {
+            data = probeContext.getImageData(0, 0, width, height).data
+        } catch (_) {
+            return null
+        }
+        let minX = width, minY = height, maxX = -1, maxY = -1
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const i = (y * width + x) * 4
+                if (data[i] < 242 || data[i + 1] < 242 || data[i + 2] < 242) {
+                    if (x < minX) minX = x
+                    if (x > maxX) maxX = x
+                    if (y < minY) minY = y
+                    if (y > maxY) maxY = y
+                }
+            }
+        }
+        if (maxX < 0 || maxY < 0) return null
+        return {
+            left: minX / width,
+            top: minY / height,
+            right: (maxX + 1) / width,
+            bottom: (maxY + 1) / height,
+        }
+    }
+
+    // Escala con la que se recorta el margen: justo la que hace que el
+    // contenido ocupe la página, sin pasarse.
+    const computeCropScale = () => {
+        if (!contentBox) return 1
+        const contentWidth = contentBox.right - contentBox.left
+        const contentHeight = contentBox.bottom - contentBox.top
+        if (contentWidth <= 0.05 || contentHeight <= 0.05) return 1
+        const scale = Math.min(1 / contentWidth, 1 / contentHeight, MAX_CROP_SCALE)
+        return scale > 1.02 ? scale : 1
+    }
+
     const render = async () => {
         const token = ++generation
         try {
@@ -679,13 +850,15 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
             if (destroyed || token !== generation) return
 
             const baseViewport = page.getViewport({ scale: 1 })
+            pageWidth = baseViewport.width
+            pageHeight = baseViewport.height
             const dpr = (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1
             // `cssScale` is baseScale * zoomLevel (fixed-layout applies both);
             // the native pinch adds `visualScale` on top. Cap the zoom factor so
             // a 5x pinch does not allocate a canvas no screen can show.
             const currentZoom = Math.max(cssScale * visualScale, 0.1)
             const zoomLimit = Math.max(fitScale, 0.1) * MAX_RENDER_ZOOM
-            let scale = Math.min(currentZoom, zoomLimit) * dpr
+            let scale = Math.min(currentZoom, zoomLimit) * dpr * displayScale()
             const byDimension = Math.min(
                 MAX_CANVAS_DIMENSION / baseViewport.width,
                 MAX_CANVAS_DIMENSION / baseViewport.height)
@@ -698,7 +871,10 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
             // zooming never allocates several giant canvases at once.
             if (!isVisible()) scale = Math.min(scale, 1.25 * dpr)
 
-            if (canvas.width && Math.abs(scale - renderedScale) < 0.02) return
+            if (canvas.width && Math.abs(scale - renderedScale) < 0.02) {
+                applyVisualState()
+                return
+            }
 
             const viewport = page.getViewport({ scale })
             const width = Math.max(1, Math.floor(viewport.width))
@@ -731,6 +907,24 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
             await task.promise
             if (destroyed || token !== generation) return
 
+            // Primera pasada: se buscan los márgenes blancos para ampliar la
+            // página hasta que el texto llene el ancho disponible.
+            if (!contentBox) {
+                const box = analyzeContentBox(surface)
+                if (box) {
+                    contentBox = box
+                    const newCrop = computeCropScale()
+                    if (Math.abs(newCrop - cropScale) > 0.01) {
+                        cropScale = newCrop
+                        surface.width = 0
+                        surface.height = 0
+                        applyVisualState()
+                        schedule(0)
+                        return
+                    }
+                }
+            }
+
             // Same CSS size as before, only the backing store grows, so the
             // text layer and the page layout stay untouched.
             canvas.width = width
@@ -744,11 +938,80 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
             surface.width = 0
             surface.height = 0
             renderedScale = scale
+            applyVisualState()
         } catch (error) {
             if (error?.name !== 'RenderingCancelledException')
                 console.warn('PDF page render failed', error)
         }
     }
+
+    // Doble toque: alterna entre 1x y 2x centrado en el punto tocado.
+    const toggleTapZoom = (clientX, clientY) => {
+        if (destroyed || !pageWidth) return
+        const current = displayScale()
+        const x = clientX / current
+        const y = clientY / current
+        const next = tapZoom > 1 ? 1 : 2
+        const nextScale = cropScale * pdfState.zoom * next
+        const delta = nextScale - current
+        tapOffsetX -= x * delta
+        tapOffsetY -= y * delta
+        tapZoom = next
+        applyVisualState()
+        updateZoomState()
+        schedule(0)
+    }
+
+    // Con la página ampliada se bloquea el arrastre horizontal para poder
+    // explorar la zona ampliada sin cambiar de página por accidente. El
+    // pinzamiento (dos dedos) no se toca para no romper el zoom nativo.
+    let touchStartX = null
+    let touchStartY = null
+    const onTouchStart = event => {
+        const touch = event.touches?.[0]
+        if (!touch) return
+        touchStartX = touch.clientX
+        touchStartY = touch.clientY
+    }
+    const onTouchMove = event => {
+        if (!isZoomed()) return
+        if (event.touches.length !== 1) return
+        if (touchStartX == null) return
+        const touch = event.touches[0]
+        const dx = Math.abs(touch.clientX - touchStartX)
+        const dy = Math.abs(touch.clientY - touchStartY)
+        if (dx > dy && dx > 8) event.preventDefault()
+    }
+
+    let lastTapTime = 0
+    let lastTapX = 0
+    let lastTapY = 0
+    const onTouchEnd = event => {
+        const touch = event.changedTouches?.[0]
+        if (!touch) return
+        const now = Date.now()
+        const isDoubleTap = now - lastTapTime < 320
+            && Math.abs(touch.clientX - lastTapX) < 48
+            && Math.abs(touch.clientY - lastTapY) < 48
+        if (isDoubleTap) {
+            lastTapTime = 0
+            toggleTapZoom(touch.clientX, touch.clientY)
+        } else {
+            lastTapTime = now
+            lastTapX = touch.clientX
+            lastTapY = touch.clientY
+        }
+    }
+    const onDoubleClick = event => {
+        if (typeof event.clientX !== 'number') return
+        toggleTapZoom(event.clientX, event.clientY)
+    }
+    try {
+        doc.addEventListener('touchstart', onTouchStart, { passive: true })
+        doc.addEventListener('touchmove', onTouchMove, { passive: false })
+        doc.addEventListener('touchend', onTouchEnd, { passive: true })
+        doc.addEventListener('dblclick', onDoubleClick)
+    } catch (_) {}
 
     // The renderer (fixed-layout) assigns `doc.scale` with baseScale * zoom
     // and then on every pinch update. Re-render only once the value settles.
@@ -775,6 +1038,7 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
 
     const unregister = registerVisualZoom(scale => {
         visualScale = scale
+        updateZoomState()
         schedule(120)
     })
 
@@ -792,8 +1056,15 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
         destroyed = true
         if (timer) clearTimeout(timer)
         pdfPageRegistry.delete(registryEntry)
+        pdfPageControllers.delete(controller)
         unregister()
         visibilityObserver?.disconnect()
+        try {
+            doc.removeEventListener('touchstart', onTouchStart)
+            doc.removeEventListener('touchmove', onTouchMove)
+            doc.removeEventListener('touchend', onTouchEnd)
+            doc.removeEventListener('dblclick', onDoubleClick)
+        } catch (_) {}
         if (task) {
             try { task.cancel() } catch (_) {}
         }
@@ -805,18 +1076,13 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
 
     // Paint a first frame immediately (white background until PDF.js finishes),
     // then let the real layout scale replace it with a sharper render.
+    applyVisualState()
     schedule(0)
 
     // Pre-load only the adjacent pages in the background, as Google Drive does.
     prefetch(index - 1)
     prefetch(index + 1)
 }
-
-const makeTOCItem = item => ({
-    label: item.title,
-    href: JSON.stringify(item.dest),
-    subitems: item.items.length ? item.items.map(makeTOCItem) : null,
-})
 
 // Cover thumbnail used only while importing a book into the library. The
 // reader itself never rasterizes pages.
@@ -832,6 +1098,20 @@ const renderCover = async page => {
         canvasContext, viewport, background: '#FFFFFF',
     }).promise
     return new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+}
+
+/// Aplica los cambios de estilo del lector al visor PDF:
+///  - el tamaño de fuente funciona como multiplicador de escala de la página
+///  - el color de fondo del tema activa el filtro nocturno/sepia
+export const applyPdfStyle = style => {
+    const fontSize = Number(style?.fontSize)
+    if (Number.isFinite(fontSize) && fontSize > 0) {
+        pdfState.zoom = clamp(fontSize / PDF_DEFAULT_FONT_SIZE, 0.35, 2.2)
+    }
+    pdfState.filter = computeReadingFilter(style?.backgroundColor)
+    for (const controller of pdfPageControllers) {
+        try { controller.refresh() } catch (_) {}
+    }
 }
 
 export const makePDF = async file => {
@@ -855,7 +1135,51 @@ export const makePDF = async file => {
     }
 
     const outline = await pdf.getOutline()
-    book.toc = outline?.map(makeTOCItem)
+    // Índice real del PDF: los marcadores (outline) con la página a la que
+    // apunta cada uno. El href es el id de la sección (índice de página), que
+    // es lo que usa el visor para saltar al contenido.
+    const resolveDestIndex = async dest => {
+        try {
+            if (dest == null) return null
+            const resolved = typeof dest === 'string'
+                ? await pdf.getDestination(dest)
+                : dest
+            if (!resolved || !resolved[0]) return null
+            const index = await pdf.getPageIndex(resolved[0])
+            return Number.isInteger(index) ? index : null
+        } catch (_) {
+            return null
+        }
+    }
+
+    const buildOutlineTOC = async items => {
+        const result = []
+        for (const item of items ?? []) {
+            const index = await resolveDestIndex(item.dest)
+            if (index == null) continue
+            const subitems = item.items?.length
+                ? await buildOutlineTOC(item.items)
+                : null
+            result.push({
+                label: item.title,
+                href: String(index),
+                subitems,
+            })
+        }
+        return result
+    }
+
+    const toc = await buildOutlineTOC(outline)
+    if (toc.length) {
+        book.toc = toc
+    } else {
+        // El PDF no trae marcadores internos: se usa la lista de páginas.
+        book.toc = Array.from({ length: pdf.numPages }, (_, index) => ({
+            label: `Page ${index + 1}`,
+            href: String(index),
+            subitems: null,
+        }))
+    }
 
     // Only metadata is requested up front. Pages are fetched on demand, so a
     // 500+ page document opens as fast as a 5 page one.
@@ -948,19 +1272,38 @@ export const makePDF = async file => {
                 width: 100%;
                 height: 100%;
                 background: #FFFFFF;
+                /* Filtro de lectura nocturna/sepia. Al ser un filtro CSS los
+                   píxeles del canvas no cambian, así que la captura para la IA
+                   sigue siendo la imagen original. */
+                filter: var(--pdf-filter, none);
             }
             ${textLayerBuilderCSS}
             ${annotationLayerBuilderCSS}
-            /* The text layer is only an invisible hit-test/selection surface:
-               its glyphs must never be painted, otherwise a missing embedded
-               font would draw fallback boxes (□□□) over the canvas. */
+            /* La capa de texto es solo una superficie invisible de selección:
+               sus glifos nunca se pintan y los resaltados se mezclan con el
+               canvas (multiply) para no tapar las letras. */
+            :root {
+                --highlight-bg-color: rgba(59, 130, 246, 0.32);
+                --highlight-selected-bg-color: rgba(59, 130, 246, 0.45);
+            }
             .textLayer {
                 opacity: 1;
+                mix-blend-mode: multiply;
             }
             .textLayer :is(span, br) {
                 color: transparent !important;
                 -webkit-text-fill-color: transparent !important;
                 text-shadow: none !important;
+            }
+            .textLayer .highlight,
+            .textLayer .highlight.selected,
+            .textLayer .highlight.appended {
+                mix-blend-mode: multiply;
+            }
+            .textLayer ::selection {
+                background: rgba(59, 130, 246, 0.25);
+                color: transparent;
+                -webkit-text-fill-color: transparent;
             }
             </style>
             </head>
@@ -1010,6 +1353,11 @@ export const makePDF = async file => {
     }
     book.isExternal = uri => /^\w+:/i.test(uri)
     book.resolveHref = async href => {
+        // El índice del PDF usa el id de la sección (índice de página).
+        if (typeof href === 'string' && /^\d+$/.test(href)) {
+            const index = Math.min(Math.max(Number(href), 0), pdf.numPages - 1)
+            return { index }
+        }
         const parsed = JSON.parse(href)
         const dest = typeof parsed === 'string'
             ? await pdf.getDestination(parsed) : parsed
@@ -1018,6 +1366,9 @@ export const makePDF = async file => {
         return { index }
     }
     book.splitTOCHref = async href => {
+        if (typeof href === 'string' && /^\d+$/.test(href)) {
+            return [Math.min(Math.max(Number(href), 0), pdf.numPages - 1), null]
+        }
         const parsed = JSON.parse(href)
         const dest = typeof parsed === 'string'
             ? await pdf.getDestination(parsed) : parsed

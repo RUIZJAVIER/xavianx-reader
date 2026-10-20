@@ -84,11 +84,14 @@ class _TranslationMenuState extends State<TranslationMenu> {
     final future = GoogleGtxTranslateProvider()
         .translateTextOnly(widget.content, from, to);
     _fastFuture = future;
-    future.then((_) {
-      if (mounted) setState(() {});
-    }).catchError((_) {
-      if (mounted) setState(() {});
-    });
+    future.then(
+      (_) {
+        if (mounted) setState(() {});
+      },
+      onError: (Object _) {
+        if (mounted) setState(() {});
+      },
+    );
   }
 
   @override

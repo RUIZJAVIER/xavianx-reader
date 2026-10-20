@@ -44,7 +44,7 @@ class GoogleGtxTranslateProvider extends TranslateServiceProvider {
       yield await translateTextOnly(text, from, to);
     } catch (e) {
       AnxLog.warning('Google GTX translation failed: $e');
-      yield* Stream.error(Exception(e));
+      rethrow;
     }
   }
 
@@ -68,7 +68,10 @@ class GoogleGtxTranslateProvider extends TranslateServiceProvider {
     };
     final uri = Uri.parse(_urlGoogleGtx).replace(queryParameters: params);
 
-    final response = await Dio().get(
+    final response = await Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: const Duration(seconds: 12),
+    )).get(
       uri.toString(),
       options: Options(
         responseType: ResponseType.plain,
@@ -76,8 +79,6 @@ class GoogleGtxTranslateProvider extends TranslateServiceProvider {
           'User-Agent':
               'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36',
         },
-        connectTimeout: const Duration(seconds: 8),
-        receiveTimeout: const Duration(seconds: 12),
       ),
     );
 

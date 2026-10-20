@@ -17,3 +17,6 @@ app/.cxx/
 
 /vendor/
 /.bundle/
+# Keystore fijo de release (firma consistente entre compilaciones)
+!key.properties
+!app/upload-keystore.jks

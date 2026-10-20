@@ -70,3 +70,8 @@ google_service_account.json
 
 # FVM Version Cache
 .fvm/
+
+# Keystore fijo de release: se versiona a proposito para que todos los APK
+# tengan la misma firma y se puedan instalar como actualizacion.
+!android/app/upload-keystore.jks
+!android/key.properties

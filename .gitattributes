@@ -3,3 +3,7 @@
 # ignore diff for generated files
 *.gen.dart binary
 *.gen.dart linguist-generated=true
+
+# El keystore de release es binario: nunca debe sufrir conversión de saltos de línea.
+*.jks binary
+*.keystore binary

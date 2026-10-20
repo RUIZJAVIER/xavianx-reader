@@ -36,9 +36,10 @@ const Set<String> _spanishWords = {
   'trabajo', 'ciudad', 'país', 'ejército', 'enemigo',
   'amigo', 'amiga', 'familia', 'padre', 'madre', 'hijo', 'hija', 'hermano',
   'hermana', 'quizá', 'tal', 'cada', 'según',
-  'contra', 'tras', 'mediante', 'aún', 'todavía', 'casi', 'sólo', 'además',
+  'contra', 'tras', 'mediante', 'aún', 'todavía', 'casi', 'además',
   'incluso', 'pues', 'acerca', 'través', 'dentro',
-  'fuera', 'debajo', 'encima', 'detrás', 'delante', 'junto', 'lejos', 'cerca'};
+  'fuera', 'debajo', 'encima', 'detrás', 'delante', 'junto', 'lejos', 'cerca',
+};
 
 /// Palabras muy frecuentes del inglés (sin ambigüedades con el español).
 const Set<String> _englishWords = {
@@ -64,7 +65,8 @@ const Set<String> _englishWords = {
   'army', 'enemy', 'friend', 'family', 'father', 'mother', 'son', 'daughter',
   'brother', 'sister', 'nothing', 'something', 'everything', 'anyone',
   'everyone', 'someone', 'perhaps', 'maybe', 'through',
-  'against', 'between', 'during', 'without', 'within', 'upon'};
+  'against', 'between', 'during', 'without', 'within', 'upon',
+};
 
 /// Detecta de forma aproximada el idioma de [text].
 ///

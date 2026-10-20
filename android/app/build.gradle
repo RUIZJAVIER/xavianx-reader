@@ -28,13 +28,6 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
-// Firma fija de release: el keystore vive en el repo (android/app/upload-keystore.jks)
-// para que todas las compilaciones tengan exactamente la misma firma y Android
-// permita instalar cada APK nuevo encima del anterior sin desinstalar.
-def releaseStoreFile = keystoreProperties['storeFile']
-def hasReleaseKeystore = keystorePropertiesFile.exists() &&
-        releaseStoreFile != null && file(releaseStoreFile).exists()
-
 android {
     namespace "com.anxcye.anx_reader"
     // compileSdk flutter.compileSdkVersion
@@ -64,25 +57,11 @@ android {
         versionName flutterVersionName
     }
 
-    signingConfigs {
-        release {
-            if (hasReleaseKeystore) {
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
-                storeFile file(releaseStoreFile)
-                storePassword keystoreProperties['storePassword']
-            }
-        }
-    }
-
     buildTypes {
         release {
-            // Mismo keystore en cada build => misma firma => actualización encima de la app anterior.
-            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
-            if (!hasReleaseKeystore) {
-                logger.warn("AVISO: no se encontró android/key.properties o el keystore de release; " +
-                        "se firmará con la clave de debug (los APK no serán actualizables entre builds).")
-            }
+            // Configuración estándar de Flutter: firma con la clave de debug,
+            // sin keystore externo, para que la compilación nunca falle por firma.
+            signingConfig signingConfigs.debug
         }
     }
 

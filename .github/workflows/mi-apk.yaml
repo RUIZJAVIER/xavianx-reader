@@ -31,21 +31,7 @@ jobs:
           dart run build_runner build --delete-conflicting-outputs
 
       - name: Compilar APK
-        run: |
-          # versionCode interno = build number del pubspec + numero de ejecucion de GitHub.
-          # Asi cada APK sube el versionCode y Android lo acepta como actualizacion.
-          BASE_CODE=$(grep -E '^version:' pubspec.yaml | head -n1 | sed -E 's/^.*\+([0-9]+).*$/\1/')
-          if ! [[ "$BASE_CODE" =~ ^[0-9]+$ ]]; then BASE_CODE=1; fi
-          VERSION_CODE=$(( BASE_CODE + GITHUB_RUN_NUMBER ))
-          echo "versionCode = $VERSION_CODE (base $BASE_CODE + run $GITHUB_RUN_NUMBER)"
-          flutter build apk --release --target-platform android-arm64 --split-per-abi --tree-shake-icons --build-number="$VERSION_CODE"
-
-      - name: Comprobar keystore de release
-        continue-on-error: true
-        run: |
-          keytool -list -v -keystore android/app/upload-keystore.jks \
-            -storepass "$(grep '^storePassword=' android/key.properties | cut -d= -f2)" \
-            -alias upload | grep -E 'Alias|SHA256|Valid'
+        run: flutter build apk --release --target-platform android-arm64 --split-per-abi --tree-shake-icons --build-number=${{ github.run_number }}
 
       - name: Subir APK listo para descargar
         uses: actions/upload-artifact@v4

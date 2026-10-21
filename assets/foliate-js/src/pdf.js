@@ -535,6 +535,43 @@ const pdfState = {
 // Páginas PDF montadas, para poder aplicarles los cambios de estilo.
 const pdfPageControllers = new Set()
 
+// Subrayados/notas de PDF guardados por la app, agrupados por página (1-based).
+// Cada entrada: { id, start, end, color, type, note }, donde `start`/`end` son
+// desplazamientos de caracteres sobre los nodos de texto de la capa de texto.
+const pdfHighlightStore = new Map()
+
+// Última página PDF avisada a Flutter (global, no por página): al volver a una
+// hoja ya visitada también hay que refrescar el encabezado y el pie.
+let lastReportedPdfPage = 0
+
+/// Reemplaza los subrayados conocidos y repinta las páginas ya montadas.
+///
+/// Se llama desde Flutter cada vez que se crea, edita o borra una nota.
+export const applyPdfHighlights = list => {
+    pdfHighlightStore.clear()
+    for (const raw of list ?? []) {
+        const page = Number(raw?.page)
+        const start = Number(raw?.start)
+        const end = Number(raw?.end)
+        if (!Number.isFinite(page) || page < 1) continue
+        if (!Number.isFinite(start) || !Number.isFinite(end)) continue
+        if (end <= start) continue
+        const bucket = pdfHighlightStore.get(page) || []
+        bucket.push({
+            id: raw?.id ?? null,
+            start,
+            end,
+            color: String(raw?.color || 'FFEB3B'),
+            type: String(raw?.type || 'highlight'),
+            note: String(raw?.note || ''),
+        })
+        pdfHighlightStore.set(page, bucket)
+    }
+    for (const controller of pdfPageControllers) {
+        try { controller.paintHighlights() } catch (_) {}
+    }
+}
+
 // Calcula el filtro de lectura a partir del color de fondo del tema.
 // El filtro se aplica por CSS, así que los píxeles del canvas (y por tanto la
 // captura que se envía a la IA) siguen siendo los originales.
@@ -685,12 +722,13 @@ const registerVisualZoom = refresh => {
 
 // Renders one PDF page into the canvas of its already-loaded iframe document
 // and wires lazy, high-density re-rendering for that page.
-const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
+const attachCanvasPage = ({ doc, index, getPage, prefetch, totalPages }) => {
     const canvas = doc.querySelector('canvas.pdf-page-canvas')
     if (!canvas) return
 
     const textLayer = doc.querySelector('.textLayer')
     const annotationLayer = doc.querySelector('.annotationLayer')
+    const highlightLayer = doc.querySelector('.pdf-highlight-layer')
 
     let cssScale = 1
     let fitScale = 1
@@ -754,11 +792,147 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
         if (!pageWidth) return
         const { x, y, s } = transformFor()
         const transform = `translate(${x}px, ${y}px) scale(${s})`
-        for (const element of [canvas, textLayer, annotationLayer]) {
+        for (const element of [canvas, highlightLayer, textLayer, annotationLayer]) {
             if (!element) continue
             element.style.transformOrigin = '0 0'
             element.style.transform = transform
         }
+    }
+
+    // Nodos de texto de la capa de selección, en el mismo orden que usa el
+    // cálculo de desplazamientos al seleccionar.
+    const textLayerTextNodes = () => {
+        const nodes = []
+        if (!textLayer) return nodes
+        const walker = doc.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT)
+        let node
+        while ((node = walker.nextNode())) {
+            if (node.parentElement?.closest?.('.endOfContent')) continue
+            nodes.push(node)
+        }
+        return nodes
+    }
+
+    // Convierte desplazamientos de caracteres en un Range del documento.
+    const offsetsToRange = (start, end) => {
+        const nodes = textLayerTextNodes()
+        let acc = 0
+        let startNode = null
+        let startOffset = 0
+        let endNode = null
+        let endOffset = 0
+        for (const node of nodes) {
+            const length = node.nodeValue?.length ?? 0
+            if (!startNode && start >= acc && start <= acc + length) {
+                startNode = node
+                startOffset = start - acc
+            }
+            if (!endNode && end >= acc && end <= acc + length) {
+                endNode = node
+                endOffset = end - acc
+            }
+            acc += length
+            if (startNode && endNode) break
+        }
+        if (!startNode || !endNode) return null
+        try {
+            const range = doc.createRange()
+            range.setStart(startNode, startOffset)
+            range.setEnd(endNode, endOffset)
+            return range
+        } catch (_) {
+            return null
+        }
+    }
+
+    // Pinta los subrayados guardados de esta página sobre el canvas.
+    const paintHighlights = () => {
+        if (!highlightLayer || destroyed || !pageWidth) return
+        const items = pdfHighlightStore.get(index + 1) || []
+        highlightLayer.replaceChildren()
+        if (!items.length) return
+        // `getClientRects()` devuelve coordenadas ya transformadas: la capa de
+        // texto se escala y se desplaza con el zoom/recorte, y la capa de
+        // subrayados recibe exactamente la misma transformación. Hay que volver
+        // al espacio local de la página para no aplicar la escala dos veces.
+        const { x, y, s } = transformFor()
+        const scale = s || 1
+        for (const item of items) {
+            const range = offsetsToRange(item.start, item.end)
+            if (!range) continue
+            let rects
+            try { rects = range.getClientRects() } catch (_) { continue }
+            const color = /^[0-9a-f]{6}$/i.test(item.color) ? item.color : 'FFEB3B'
+            for (const rect of rects) {
+                if (rect.width <= 0 || rect.height <= 0) continue
+                const left = (rect.left - x) / scale
+                const top = (rect.top - y) / scale
+                const width = rect.width / scale
+                const height = rect.height / scale
+                const box = doc.createElement('div')
+                box.className = 'pdf-highlight'
+                box.style.left = `${left}px`
+                box.style.top = `${top}px`
+                box.style.width = `${width}px`
+                box.style.backgroundColor = `#${color}`
+                if (item.type === 'underline') {
+                    box.style.height = '2px'
+                    box.style.top = `${top + height - 2}px`
+                    box.style.opacity = '0.95'
+                    box.style.borderRadius = '0'
+                } else {
+                    box.style.height = `${height}px`
+                    box.style.opacity = '0.38'
+                }
+                if (item.note) box.title = item.note
+                highlightLayer.appendChild(box)
+            }
+        }
+    }
+
+    // ¿Hay una selección activa? Mientras el usuario ajusta los selectores
+    // verdes no se debe repintar el canvas: Android muestra la lupa sobre la
+    // superficie y un repintado la dejaba en blanco.
+    const hasActiveSelection = () => {
+        try {
+            const own = doc.getSelection?.()
+            if (own && own.toString().length > 0) return true
+            const parent = window.getSelection?.()
+            if (parent && parent.toString().length > 0) return true
+        } catch (_) {}
+        return false
+    }
+
+    // Fracción del área de la hoja que se ve en pantalla (0..1). Durante un
+    // deslizamiento hay dos hojas visibles: sólo la que ocupa la mayor parte
+    // debe anunciarse como página actual.
+    const visibleRatio = () => {
+        if (!iframe) return 1
+        try {
+            const rect = iframe.getBoundingClientRect()
+            const width = Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0)
+            const height = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0)
+            if (width <= 0 || height <= 0) return 0
+            const area = Math.max(1, rect.width * rect.height)
+            return (width * height) / area
+        } catch (_) {
+            return 1
+        }
+    }
+
+    // Avisa a Flutter de la página visible para que el encabezado y el pie
+    // (Page X / X/26) se actualicen al instante al cambiar de hoja.
+    const reportVisiblePage = () => {
+        if (destroyed || visibleRatio() < 0.55) return
+        const page = index + 1
+        if (page === lastReportedPdfPage) return
+        lastReportedPdfPage = page
+        try {
+            window.flutter_inappwebview?.callHandler?.('onPdfPageChanged', {
+                page,
+                total: Number(totalPages) || 0,
+            })
+        } catch (_) {}
     }
 
     const controller = {
@@ -768,6 +942,7 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
             updateZoomState()
             schedule(0)
         },
+        paintHighlights: () => paintHighlights(),
     }
     pdfPageControllers.add(controller)
 
@@ -844,6 +1019,13 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
     }
 
     const render = async () => {
+        // Nunca se limpia/repinta el canvas mientras hay texto seleccionado:
+        // Android dibuja la lupa sobre la superficie y un repintado la dejaba
+        // en blanco (recuadro blanco sin letras).
+        if (hasActiveSelection()) {
+            schedule(200)
+            return
+        }
         const token = ++generation
         try {
             const page = await getPage(index)
@@ -873,6 +1055,8 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
 
             if (canvas.width && Math.abs(scale - renderedScale) < 0.02) {
                 applyVisualState()
+                paintHighlights()
+                reportVisiblePage()
                 return
             }
 
@@ -906,6 +1090,14 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
             })
             await task.promise
             if (destroyed || token !== generation) return
+            // La selección pudo empezar durante el render: se conserva el
+            // bitmap anterior y se reintenta al terminar de seleccionar.
+            if (hasActiveSelection()) {
+                surface.width = 0
+                surface.height = 0
+                schedule(200)
+                return
+            }
 
             // Primera pasada: se buscan los márgenes blancos para ampliar la
             // página hasta que el texto llene el ancho disponible.
@@ -939,6 +1131,8 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
             surface.height = 0
             renderedScale = scale
             applyVisualState()
+            paintHighlights()
+            reportVisiblePage()
         } catch (error) {
             if (error?.name !== 'RenderingCancelledException')
                 console.warn('PDF page render failed', error)
@@ -1047,8 +1241,14 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
     let visibilityObserver = null
     if (iframe && typeof IntersectionObserver === 'function') {
         visibilityObserver = new IntersectionObserver(entries => {
-            if (entries.some(entry => entry.isIntersecting)) schedule(0)
-        })
+            if (!entries.some(entry => entry.isIntersecting)) return
+            schedule(0)
+            // Solo la hoja que ocupa la mayor parte de la pantalla se anuncia
+            // como página actual (evita que la vecina pise el contador).
+            if (entries.some(entry => entry.intersectionRatio >= 0.6)) {
+                reportVisiblePage()
+            }
+        }, { threshold: [0, 0.6] })
         try { visibilityObserver.observe(iframe) } catch (_) {}
     }
 
@@ -1077,6 +1277,7 @@ const attachCanvasPage = ({ doc, index, getPage, prefetch }) => {
     // Paint a first frame immediately (white background until PDF.js finishes),
     // then let the real layout scale replace it with a sharper render.
     applyVisualState()
+    paintHighlights()
     schedule(0)
 
     // Pre-load only the adjacent pages in the background, as Google Drive does.
@@ -1224,9 +1425,34 @@ export const makePDF = async file => {
             'position:absolute;left:-100000px;top:0;visibility:hidden;pointer-events:none;'
         staging.append(textLayer)
         document.body.append(staging)
+        // PDF.js entrega los fragmentos en el orden interno del PDF, que a
+        // veces no coincide con el orden visual. Al ordenarlos de arriba hacia
+        // abajo (transform[5] descendente) y de izquierda a derecha
+        // (transform[4] ascendente), arrastrar los selectores verdes sigue el
+        // texto de la página y no salta al pie ni a otra columna. Los
+        // marcadores de contenido (sin `transform`) se quedan en su sitio.
+        const items = Array.isArray(textContent?.items)
+            ? [...textContent.items]
+            : []
+        const textSlots = []
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i]
+            if (Array.isArray(item?.transform) && typeof item.str === 'string')
+                textSlots.push(i)
+        }
+        const orderedItems = textSlots.map(i => items[i]).sort((a, b) => {
+            const ay = Number(a?.transform?.[5]) || 0
+            const by = Number(b?.transform?.[5]) || 0
+            if (Math.abs(by - ay) > 0.5) return by - ay
+            const ax = Number(a?.transform?.[4]) || 0
+            const bx = Number(b?.transform?.[4]) || 0
+            return ax - bx
+        })
+        textSlots.forEach((slot, k) => { items[slot] = orderedItems[k] })
+        const sortedTextContent = { ...textContent, items }
         try {
             await pdfjsLib.renderTextLayer({
-                textContentSource: textContent,
+                textContentSource: sortedTextContent,
                 container: textLayer,
                 viewport,
             }).promise
@@ -1277,6 +1503,23 @@ export const makePDF = async file => {
                    sigue siendo la imagen original. */
                 filter: var(--pdf-filter, none);
             }
+            /* Capa propia para los subrayados guardados: se pinta con rects del
+               rango de texto, así que no modifica el DOM de la capa de texto ni
+               afecta a la selección. */
+            .pdf-highlight-layer {
+                position: absolute;
+                inset: 0;
+                overflow: hidden;
+                pointer-events: none;
+                transform-origin: 0 0;
+                z-index: 1;
+            }
+            .pdf-highlight-layer .pdf-highlight {
+                position: absolute;
+                border-radius: 2px;
+                mix-blend-mode: multiply;
+                pointer-events: none;
+            }
             ${textLayerBuilderCSS}
             ${annotationLayerBuilderCSS}
             /* La capa de texto es solo una superficie invisible de selección:
@@ -1289,6 +1532,16 @@ export const makePDF = async file => {
             .textLayer {
                 opacity: 1;
                 mix-blend-mode: multiply;
+                /* El contenedor no es seleccionable: tocar un hueco en blanco
+                   entre líneas ya no arrastra toda la página. Solo los <span>
+                   con texto real participan en la selección. */
+                user-select: none;
+                -webkit-user-select: none;
+            }
+            .textLayer span {
+                user-select: text;
+                -webkit-user-select: text;
+                line-height: 1.0;
             }
             .textLayer :is(span, br) {
                 color: transparent !important;
@@ -1309,6 +1562,7 @@ export const makePDF = async file => {
             </head>
             <body>
             <canvas class="pdf-page-canvas"></canvas>
+            <div class="pdf-highlight-layer"></div>
             ${textLayer.outerHTML}
             ${annotationLayer.outerHTML}
             </body>
@@ -1336,7 +1590,7 @@ export const makePDF = async file => {
     }
 
     book.onPageLoad = (doc, index) => attachCanvasPage({
-        doc, index, getPage, prefetch,
+        doc, index, getPage, prefetch, totalPages: pdf.numPages,
     })
 
     book.sections = Array.from({ length: pdf.numPages }).map((_, i) => ({

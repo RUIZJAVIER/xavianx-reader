@@ -287,8 +287,8 @@ bool looksLikeTranslationFailure(String? value) {
   if (lower.startsWith('error') || lower.startsWith('exception')) return true;
 
   // Las respuestas con el formato esperado ya son contenido real: aunque
-  // mencionen palabras como «timeout» no deben descartarse.
-  if (trimmed.contains('Explicación:') || trimmed.contains('Traducción:')) {
+  // mencionen palabras como «timeout» o «error» no deben descartarse.
+  if (trimmed.contains('Explicación') || trimmed.contains('Traducción:')) {
     return false;
   }
 

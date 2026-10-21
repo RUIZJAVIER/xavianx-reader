@@ -290,6 +290,37 @@ const getPdfSelectionText = range => {
     return text.replace(/[ \t]{2,}/g, ' ').trim();
 };
 
+// Desplazamientos (start/end) de una selección dentro de la capa de texto de un
+// PDF. Se usan para guardar el subrayado como `pdf:page=N:start-end` y poder
+// repintarlo después sin depender del CFI (que en PDF no codifica la posición).
+const getPdfTextOffsets = range => {
+  try {
+    const startNode = range.startContainer;
+    const endNode = range.endContainer;
+    if (startNode?.nodeType !== 3 || endNode?.nodeType !== 3) return null;
+    const doc = startNode.ownerDocument;
+    const layer = doc?.querySelector('.textLayer');
+    if (!layer) return null;
+    const walker = doc.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
+    let acc = 0;
+    let start = null;
+    let end = null;
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.parentElement?.closest?.('.endOfContent')) continue;
+      const length = node.nodeValue?.length ?? 0;
+      if (node === startNode) start = acc + range.startOffset;
+      if (node === endNode) end = acc + range.endOffset;
+      acc += length;
+      if (start != null && end != null) break;
+    }
+    if (start == null || end == null || end <= start) return null;
+    return { start, end };
+  } catch (_) {
+    return null;
+  }
+};
+
 const handleSelection = (view, doc, index) => {
   const selection = doc.getSelection();
   let range = getSelectionRange(selection);
@@ -324,6 +355,7 @@ const handleSelection = (view, doc, index) => {
   }
 
   const contextText = buildRangeContextText(range);
+  const pdfOffsets = isPdf ? getPdfTextOffsets(range) : null;
 
   onSelectionEnd({
     index,
@@ -332,7 +364,10 @@ const handleSelection = (view, doc, index) => {
     cfi,
     pos: position,
     text,
-    contextText
+    contextText,
+    pdfPage: isPdf ? index + 1 : null,
+    startOffset: pdfOffsets?.start ?? null,
+    endOffset: pdfOffsets?.end ?? null,
   });
 };
 
@@ -1428,6 +1463,9 @@ class Reader {
 
   addAnnotation(annotation) {
     const { value } = annotation
+    // Los subrayados de PDF se guardan como `pdf:page=N:start-end` y los pinta
+    // pdf.js sobre el canvas; no son CFI y no deben pasar por el overlayer.
+    if (!value || String(value).startsWith('pdf:')) return
     const spineCode = (value.split('/')[2].split('!')[0] - 2) / 2
 
     const list = this.annotations.get(spineCode)
@@ -1494,6 +1532,7 @@ class Reader {
   }
 
   removeAnnotation(cfi) {
+    if (!cfi || String(cfi).startsWith('pdf:')) return
     const annotation = this.annotationsByValue.get(cfi)
     if (!annotation) return
     const { value } = annotation
@@ -1814,14 +1853,28 @@ class Reader {
   }
 
   handleBookmark = (remove) => {
-    const cfi = remove ? this.#bookmarkInfo.cfi : this.view.lastLocation?.cfi
+    const last = this.view.lastLocation
+    const cfi = remove ? this.#bookmarkInfo.cfi : last?.cfi
 
-    let content = this.view.lastLocation.range.startContainer.data ?? this.view.lastLocation.range.startContainer.innerText
-    content = content.trim()
+    // En PDF `lastLocation.range` es null (el renderer de página fija no
+    // informa un rango de texto), así que se usa la página actual. Sin esta
+    // guarda el botón de marcador lanzaba una excepción y no hacía nada.
+    const range = last?.range
+    let content = ''
+    if (range?.startContainer) {
+      content = range.startContainer.data
+        ?? range.startContainer.innerText
+        ?? range.startContainer.textContent
+        ?? ''
+    }
+    content = String(content).trim()
+    if (!content && isPdf) {
+      content = `Page ${(this.#index ?? 0) + 1}`
+    }
     if (content.length > 200) {
       content = content.slice(0, 200) + '...'
     }
-    const percentage = this.view.lastLocation.fraction
+    const percentage = Number(last?.fraction) || 0
 
     callFlutter('handleBookmark', {
       remove,
@@ -2060,6 +2113,16 @@ window.changeStyle = (newStyle) => {
 window.goToHref = href => reader.view.goTo(href)
 
 window.goToCfi = cfi => reader.view.goTo(cfi)
+
+// Subrayados de PDF: la app envía [{page,start,end,color,type,note}] y pdf.js
+// los repinta sobre cada página ya montada.
+window.setPdfHighlights = list => {
+  try {
+    pdfModule?.applyPdfHighlights?.(Array.isArray(list) ? list : [])
+  } catch (error) {
+    console.warn('setPdfHighlights failed', error)
+  }
+}
 
 window.goToPercent = percent => reader.view.goToFraction(percent)
 

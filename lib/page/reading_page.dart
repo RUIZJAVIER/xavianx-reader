@@ -829,13 +829,9 @@ class ReadingPageState extends ConsumerState<ReadingPage>
                     IconButton(
                         tooltip: L10n.of(context).readingPageBookmark,
                         onPressed: () {
-                          if (bookmarkExists) {
-                            epubPlayerKey.currentState!.removeAnnotation(
-                              epubPlayerKey.currentState!.bookmarkCfi,
-                            );
-                          } else {
-                            epubPlayerKey.currentState!.addBookmarkHere();
-                          }
+                          // El estado lo gestiona el reproductor: en EPUB usa el
+                          // visor y en PDF guarda `pdf:page=N` en la base.
+                          epubPlayerKey.currentState?.toggleBookmarkHere();
                         },
                         icon: bookmarkExists
                             ? const Icon(Icons.bookmark)

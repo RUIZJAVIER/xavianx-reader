@@ -115,6 +115,21 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   bool _selectionClearLocked = false;
   bool _selectionClearPending = false;
 
+  // --- Selección y anotaciones en PDF ---
+  /// Android dispara `contextmenu` muchas veces mientras se arrastran los
+  /// selectores verdes. La traducción y el menú se lanzan una sola vez, cuando
+  /// la selección lleva 500 ms quieta.
+  Timer? _selectionDebounce;
+  int _selectionGeneration = 0;
+  /// Total de páginas real del PDF (lo informa el visor).
+  int _pdfTotalPages = 0;
+  /// Página visible del PDF según el visor (1-based).
+  int _pdfVisiblePage = 0;
+
+  static final RegExp _pdfBookmarkCfiPattern = RegExp(r'^pdf:page=(\d+)$');
+  static final RegExp _pdfNoteCfiPattern = RegExp(r'^pdf:page=(\d+):(\d+)-(\d+)$');
+  static final RegExp _pdfSpineCfiPattern = RegExp(r'^epubcfi\(/6/(\d+)');
+
   // --- AI vision OCR (scanned / photocopied PDF pages) ---
   /// Service that turns a page screenshot into text via the user's AI config.
   final AiVisionOcrService _visionOcr = const AiVisionOcrService();
@@ -144,6 +159,43 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
 
   /// True when the open book is a PDF (rendered on a canvas).
   bool get isPdf => _isPdf;
+
+  /// Página (1-based) que representa un CFI de PDF, un marcador `pdf:page=N` o
+  /// una nota `pdf:page=N:start-end`.
+  int? _pdfPageFromCfi(String value) {
+    if (value.isEmpty) return null;
+    final bookmark = _pdfBookmarkCfiPattern.firstMatch(value);
+    if (bookmark != null) return int.tryParse(bookmark.group(1)!);
+    final note = _pdfNoteCfiPattern.firstMatch(value);
+    if (note != null) return int.tryParse(note.group(1)!);
+    // CFI sintético del renderer de página fija: epubcfi(/6/N) con N = 2*página.
+    final spine = _pdfSpineCfiPattern.firstMatch(value);
+    if (spine != null) {
+      final index = int.tryParse(spine.group(1)!);
+      if (index != null && index >= 2) return index ~/ 2;
+    }
+    return null;
+  }
+
+  /// Página actual del PDF (1-based).
+  int get pdfCurrentPage {
+    if (_pdfVisiblePage > 0) return _pdfVisiblePage;
+    return _pdfPageFromCfi(cfi) ??
+        (chapterCurrentPage > 0 ? chapterCurrentPage : 1);
+  }
+
+  String pdfBookmarkCfi([int? page]) => 'pdf:page=${page ?? pdfCurrentPage}';
+
+  bool isPdfBookmarkCfi(String value) => _pdfBookmarkCfiPattern.hasMatch(value);
+
+  bool isPdfNoteCfi(String value) => value.startsWith('pdf:page=');
+
+  /// Progreso (0..1) de una página de PDF; la última hoja llega al 100%.
+  double _pdfPagePercentage(int page) {
+    final total = _pdfTotalPages > 0 ? _pdfTotalPages : chapterTotalPages;
+    if (total <= 1) return 0.0;
+    return ((page - 1) / (total - 1)).clamp(0.0, 1.0).toDouble();
+  }
 
   void prevPage() {
     webViewController.execute('''
@@ -309,9 +361,31 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
 
   void goToHref(String href) => webViewController.execute("goToHref('$href')");
 
-  void goToCfi(String cfi) => webViewController.execute("goToCfi('$cfi')");
+  void goToCfi(String cfi) {
+    // Marcadores y notas de PDF: el CFI sintético sólo codifica la página.
+    final pdfPage = _isPdf ? _pdfPageFromCfi(cfi) : null;
+    if (pdfPage != null) {
+      goToPage(pdfPage);
+      return;
+    }
+    webViewController.execute("goToCfi('$cfi')");
+  }
+
+  /// Salta a una página concreta de un PDF (1-based).
+  void goToPage(int page) {
+    final total = _pdfTotalPages > 0 ? _pdfTotalPages : chapterTotalPages;
+    final target = (total > 0 ? page.clamp(1, total) : page).toInt();
+    _pdfVisiblePage = target;
+    webViewController.execute("goToHref('${target - 1}')");
+  }
 
   void addAnnotation(BookNote bookNote) {
+    // Los subrayados de PDF los pinta pdf.js sobre el canvas a partir de la
+    // lista de notas; no se envían al overlayer de CFI.
+    if (_isPdf && isPdfNoteCfi(bookNote.cfi)) {
+      _pushPdfHighlightsSoon();
+      return;
+    }
     final noteContent =
         (bookNote.content).replaceAll('\n', ' ').replaceAll("'", "\\'");
     webViewController.execute('''
@@ -326,6 +400,11 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   }
 
   void addBookmark(BookmarkModel bookmark) {
+    if (_isPdf) {
+      // Los marcadores de PDF viven sólo en la base de datos.
+      _refreshPdfBookmarkState();
+      return;
+    }
     webViewController.execute('''
       addAnnotation({
         id: ${bookmark.id},
@@ -343,8 +422,128 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
       ''');
   }
 
-  void removeAnnotation(String cfi) =>
-      webViewController.execute("removeAnnotation('$cfi')");
+  /// Alterna el marcador de la página actual.
+  ///
+  /// En EPUB se delega al visor (gesto/JS). En PDF se guarda en la base de
+  /// datos con un CFI sintético `pdf:page=N`, porque el visor de página fija
+  /// no expone un rango de texto para el marcador.
+  Future<void> toggleBookmarkHere() async {
+    if (!_isPdf) {
+      if (bookmarkExists) {
+        removeAnnotation(bookmarkCfi);
+      } else {
+        addBookmarkHere();
+      }
+      return;
+    }
+
+    final page = pdfCurrentPage;
+    final cfi = pdfBookmarkCfi(page);
+    final notifier = ref.read(BookmarkProvider(book.id).notifier);
+    try {
+      final bookmarks = await ref.read(BookmarkProvider(book.id).future);
+      final existing = bookmarks.where((b) => b.cfi == cfi).toList();
+      if (existing.isNotEmpty) {
+        notifier.removeBookmark(cfi: cfi);
+        bookmarkCfi = '';
+        bookmarkExists = false;
+      } else {
+        final now = DateTime.now();
+        await notifier.addBookmark(BookmarkModel(
+          bookId: book.id,
+          content: 'Page $page',
+          cfi: cfi,
+          chapter: 'Page $page',
+          percentage: percentage,
+          createTime: now,
+          updateTime: now,
+        ));
+        bookmarkCfi = cfi;
+        bookmarkExists = true;
+      }
+      if (!mounted) return;
+      setState(() {});
+      widget.updateParent();
+    } catch (e) {
+      AnxLog.warning('toggleBookmarkHere (PDF) failed: $e');
+    }
+  }
+
+  /// Mantiene el icono de marcador sincronizado con la página actual del PDF.
+  Future<void> _refreshPdfBookmarkState() async {
+    if (!_isPdf || !mounted) return;
+    final cfi = pdfBookmarkCfi();
+    try {
+      final bookmarks = await ref.read(BookmarkProvider(book.id).future);
+      final exists = bookmarks.any((b) => b.cfi == cfi);
+      if (!mounted) return;
+      if (exists == bookmarkExists && (!exists || bookmarkCfi == cfi)) return;
+      setState(() {
+        bookmarkExists = exists;
+        bookmarkCfi = exists ? cfi : '';
+      });
+      widget.updateParent();
+    } catch (e) {
+      AnxLog.warning('PDF bookmark state failed: $e');
+    }
+  }
+
+  void removeAnnotation(String cfi) {
+    if (isPdfNoteCfi(cfi)) {
+      // Marcador de PDF: se actualiza el icono al instante.
+      if (isPdfBookmarkCfi(cfi) && bookmarkCfi == cfi) {
+        bookmarkExists = false;
+        bookmarkCfi = '';
+        if (mounted) setState(() {});
+        widget.updateParent();
+      }
+      _pushPdfHighlightsSoon();
+      return;
+    }
+    webViewController.execute("removeAnnotation('$cfi')");
+  }
+
+  /// Envía a pdf.js los subrayados guardados de este libro para que los pinte
+  /// sobre cada página.
+  Future<void> _pushPdfHighlights() async {
+    if (!_isPdf) return;
+    try {
+      final notes = await bookNoteDao.selectBookNotesByBookId(book.id);
+      final payload = <Map<String, dynamic>>[];
+      for (final note in notes) {
+        if (note.type == 'bookmark') continue;
+        final match = _pdfNoteCfiPattern.firstMatch(note.cfi);
+        if (match == null) continue;
+        final page = int.tryParse(match.group(1) ?? '');
+        final start = int.tryParse(match.group(2) ?? '');
+        final end = int.tryParse(match.group(3) ?? '');
+        if (page == null || start == null || end == null || end <= start) {
+          continue;
+        }
+        payload.add({
+          'id': note.id,
+          'page': page,
+          'start': start,
+          'end': end,
+          'color': note.color,
+          'type': note.type,
+          'note': note.readerNote ?? '',
+        });
+      }
+      await webViewController
+          .execute('window.setPdfHighlights(${jsonEncode(payload)})');
+    } catch (e) {
+      AnxLog.warning('PDF highlights sync failed: $e');
+    }
+  }
+
+  /// Reintenta la sincronización tras un borrado (la fila se elimina sin
+  /// esperar en la UI, así que se da un margen antes de releer la base).
+  void _pushPdfHighlightsSoon() {
+    Future.delayed(const Duration(milliseconds: 150), () {
+      if (mounted) _pushPdfHighlights();
+    });
+  }
 
   void clearSearch() {
     ref.read(tocSearchProvider.notifier).clear();
@@ -460,8 +659,15 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   }
 
   Future<void> initTts({String? fromCfi}) async {
-    if (fromCfi != null && fromCfi.isNotEmpty) {
-      await webViewController.execute("window.ttsFromCfi('$fromCfi')");
+    // En PDF el CFI sintético (pdf:page=N...) no se puede resolver a un rango
+    // de texto: se narra desde la posición actual del visor.
+    final usableCfi = (fromCfi != null &&
+            fromCfi.isNotEmpty &&
+            !isPdfNoteCfi(fromCfi))
+        ? fromCfi
+        : null;
+    if (usableCfi != null) {
+      await webViewController.execute("window.ttsFromCfi('$usableCfi')");
     } else {
       await webViewController.execute("window.ttsHere()");
     }
@@ -793,16 +999,77 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     }
   }
 
+  /// CFI sintético para una selección de PDF: `pdf:page=N:start-end`, donde
+  /// los desplazamientos son índices de caracteres en la capa de texto.
+  String _pdfSelectionCfi(Map<String, dynamic> location) {
+    final page = (location['pdfPage'] as num?)?.toInt() ?? pdfCurrentPage;
+    final start = (location['startOffset'] as num?)?.toInt();
+    final end = (location['endOffset'] as num?)?.toInt();
+    if (start != null && end != null && end > start) {
+      return 'pdf:page=$page:$start-$end';
+    }
+    return 'pdf:page=$page';
+  }
+
+  /// Abre el menú de selección/traducción una vez que la selección se detuvo.
+  void _handleSelectionEnd(Map<String, dynamic> location) {
+    if (!mounted) return;
+    removeOverlay();
+    final text = location['text']?.toString() ?? '';
+    if (text.trim().isEmpty) return;
+    var cfi = location['cfi']?.toString() ?? '';
+    if (_isPdf) {
+      cfi = _pdfSelectionCfi(location);
+      final page = _pdfPageFromCfi(cfi) ?? pdfCurrentPage;
+      chapterCurrentPage = page;
+      _pdfVisiblePage = page;
+      chapterTitle = 'Page $page';
+    }
+    // En PDF la selección también debe ofrecer subrayar/resaltar (el menú de
+    // anotaciones se oculta cuando `footnote` es true).
+    final footnote = _isPdf ? false : (location['footnote'] == true);
+    final rawContextText = location['contextText']?.toString();
+    _lastSelectionContextText =
+        (rawContextText?.trim().isEmpty ?? true) ? null : rawContextText;
+    final pos = location['pos'];
+    if (pos is! Map) return;
+    final left = (pos['left'] as num?)?.toDouble() ?? 0;
+    final top = (pos['top'] as num?)?.toDouble() ?? 0;
+    final right = (pos['right'] as num?)?.toDouble() ?? 0;
+    final bottom = (pos['bottom'] as num?)?.toDouble() ?? 0;
+    showContextMenu(
+      context,
+      left,
+      top,
+      right,
+      bottom,
+      text,
+      cfi,
+      null,
+      footnote,
+      writingMode.isVertical ? Axis.vertical : Axis.horizontal,
+      contextText: _lastSelectionContextText,
+    );
+  }
+
   Future<void> renderAnnotations(EpubWebViewController controller) async {
     List<BookNote> annotationList =
         await bookNoteDao.selectBookNotesByBookId(widget.book.id);
+    // Los subrayados de PDF usan `pdf:page=N:start-end` y los pinta pdf.js
+    // sobre el canvas: no son CFI válidos para el overlayer del EPUB.
+    final cfiAnnotations = _isPdf
+        ? annotationList.where((e) => !isPdfNoteCfi(e.cfi)).toList()
+        : annotationList;
     String allAnnotations =
-        jsonEncode(annotationList.map((e) => e.toJson()).toList())
+        jsonEncode(cfiAnnotations.map((e) => e.toJson()).toList())
             .replaceAll('\'', '\\\'');
     controller.execute('''
      const allAnnotations = $allAnnotations
      renderAnnotations()
     ''');
+    if (_isPdf) {
+      await _pushPdfHighlights();
+    }
   }
 
   void getThemeColor() {
@@ -834,21 +1101,46 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     controller.addJavaScriptHandler(
         handlerName: 'onRelocated',
         callback: (args) {
-          Map<String, dynamic> location = args[0];
-          if (cfi == location['cfi']) return;
-          // if (chapterHref != location['chapterHref']) {
-          //   refreshToc();
-          // }
+          final raw = args.isNotEmpty ? args.first : null;
+          if (raw is! Map) return;
+          Map<String, dynamic> location = Map<String, dynamic>.from(raw);
+          final nextCfi = location['cfi']?.toString() ?? '';
+          // En PDF el CFI es sintético (cambia con la página), pero el
+          // encabezado/pie deben refrescarse siempre: no se descarta el evento
+          // aunque el CFI se repita.
+          if (!_isPdf && nextCfi == cfi) return;
+          final pdfPage = _isPdf ? _pdfPageFromCfi(nextCfi) : null;
           setState(() {
-            cfi = location['cfi'] ?? '';
-            percentage =
-                double.tryParse(location['percentage'].toString()) ?? 0.0;
-            chapterTitle = location['chapterTitle'] ?? '';
-            chapterHref = location['chapterHref'] ?? '';
-            chapterCurrentPage = location['chapterCurrentPage'] ?? 0;
-            chapterTotalPages = location['chapterTotalPages'] ?? 0;
-            bookmarkExists = location['bookmark']['exists'] ?? false;
-            bookmarkCfi = location['bookmark']['cfi'] ?? '';
+            cfi = nextCfi;
+            if (_isPdf) {
+              final reportedTotal =
+                  (location['chapterTotalPages'] as num?)?.toInt() ?? 0;
+              if (reportedTotal > 0) _pdfTotalPages = reportedTotal;
+              final reportedPage =
+                  (location['chapterCurrentPage'] as num?)?.toInt() ?? 0;
+              final page = pdfPage ??
+                  (reportedPage > 0 ? reportedPage : chapterCurrentPage);
+              chapterCurrentPage = page > 0 ? page : 1;
+              _pdfVisiblePage = chapterCurrentPage;
+              chapterTotalPages =
+                  _pdfTotalPages > 0 ? _pdfTotalPages : reportedTotal;
+              chapterTitle = 'Page $chapterCurrentPage';
+              chapterHref = location['chapterHref']?.toString() ?? chapterHref;
+              percentage = _pdfPagePercentage(chapterCurrentPage);
+              // El estado del marcador lo calcula Dart (pdf:page=N).
+            } else {
+              percentage =
+                  double.tryParse(location['percentage'].toString()) ?? 0.0;
+              chapterTitle = location['chapterTitle'] ?? '';
+              chapterHref = location['chapterHref'] ?? '';
+              chapterCurrentPage = location['chapterCurrentPage'] ?? 0;
+              chapterTotalPages = location['chapterTotalPages'] ?? 0;
+              final bookmark = location['bookmark'];
+              if (bookmark is Map) {
+                bookmarkExists = bookmark['exists'] ?? false;
+                bookmarkCfi = bookmark['cfi'] ?? '';
+              }
+            }
             writingMode =
                 WritingModeEnum.fromCode(location['writingMode'] ?? '');
           });
@@ -863,6 +1155,37 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
           widget.updateParent();
           saveReadingProgress();
           readingPageKey.currentState?.resetAwakeTimer();
+          if (_isPdf) _refreshPdfBookmarkState();
+        });
+    controller.addJavaScriptHandler(
+        handlerName: 'onPdfPageChanged',
+        callback: (args) {
+          if (!_isPdf) return;
+          final raw = args.isNotEmpty ? args.first : null;
+          if (raw is! Map) return;
+          final payload = Map<String, dynamic>.from(raw);
+          final page = (payload['page'] as num?)?.toInt() ?? 0;
+          final total = (payload['total'] as num?)?.toInt() ?? 0;
+          if (page <= 0) return;
+          if (total > 0) _pdfTotalPages = total;
+          if (page == chapterCurrentPage && total == chapterTotalPages) return;
+          setState(() {
+            chapterCurrentPage = page;
+            _pdfVisiblePage = page;
+            if (_pdfTotalPages > 0) chapterTotalPages = _pdfTotalPages;
+            chapterTitle = 'Page $page';
+            percentage = _pdfPagePercentage(page);
+          });
+          ref.read(currentReadingProvider.notifier).update(
+                cfi: cfi,
+                percentage: percentage,
+                chapterTitle: chapterTitle,
+                chapterHref: chapterHref,
+                chapterCurrentPage: chapterCurrentPage,
+                chapterTotalPages: chapterTotalPages,
+              );
+          widget.updateParent();
+          _refreshPdfBookmarkState();
         });
     controller.addJavaScriptHandler(
         handlerName: 'onClick',
@@ -898,35 +1221,26 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     controller.addJavaScriptHandler(
         handlerName: 'onSelectionEnd',
         callback: (args) {
-          removeOverlay();
-          Map<String, dynamic> location = args[0];
-          String cfi = location['cfi'];
-          String text = location['text'];
-          bool footnote = location['footnote'];
-          final rawContextText = location['contextText']?.toString();
-          _lastSelectionContextText =
-              (rawContextText?.trim().isEmpty ?? true) ? null : rawContextText;
-          double left = (location['pos']['left'] as num).toDouble();
-          double top = (location['pos']['top'] as num).toDouble();
-          double right = (location['pos']['right'] as num).toDouble();
-          double bottom = (location['pos']['bottom'] as num).toDouble();
-          showContextMenu(
-            context,
-            left,
-            top,
-            right,
-            bottom,
-            text,
-            cfi,
-            null,
-            footnote,
-            writingMode.isVertical ? Axis.vertical : Axis.horizontal,
-            contextText: _lastSelectionContextText,
-          );
+          final raw = args.isNotEmpty ? args.first : null;
+          if (raw is! Map) return;
+          final location = Map<String, dynamic>.from(raw);
+          // Se espera a que la selección esté quieta: mientras se arrastran
+          // los selectores verdes, Android dispara decenas de eventos y la
+          // traducción se quedaba colgada en "...".
+          _selectionDebounce?.cancel();
+          final generation = ++_selectionGeneration;
+          _selectionDebounce =
+              Timer(const Duration(milliseconds: 500), () {
+            if (!mounted || generation != _selectionGeneration) return;
+            _handleSelectionEnd(location);
+          });
         });
     controller.addJavaScriptHandler(
         handlerName: 'onSelectionCleared',
         callback: (args) {
+          // Cancela el menú/traducción pendiente de una selección descartada.
+          _selectionDebounce?.cancel();
+          _selectionGeneration++;
           if (_selectionClearLocked) {
             _selectionClearPending = true;
             return;
@@ -1042,8 +1356,18 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
         Map<String, dynamic> detail = args[0]['detail'];
         bool remove = args[0]['remove'];
         String cfi = detail['cfi'] ?? '';
-        double percentage = double.parse(detail['percentage'].toString());
-        String content = detail['content'];
+        double percentage =
+            double.tryParse(detail['percentage'].toString()) ?? 0.0;
+        String content = detail['content']?.toString() ?? '';
+
+        // El gesto de la esquina en un PDF no tiene CFI de texto: se guarda el
+        // marcador sintético de la página actual.
+        if (_isPdf) {
+          final page = _pdfPageFromCfi(cfi) ?? pdfCurrentPage;
+          cfi = pdfBookmarkCfi(page);
+          if (content.trim().isEmpty) content = 'Page $page';
+          percentage = _pdfPagePercentage(page);
+        }
 
         if (remove) {
           ref.read(bookmarkProvider(widget.book.id).notifier).removeBookmark(
@@ -1186,6 +1510,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   @override
   void dispose() {
     _scrollDebounceTimer?.cancel();
+    _selectionDebounce?.cancel();
     _animationController?.dispose();
     saveReadingProgress();
     removeOverlay();
@@ -1307,7 +1632,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
       final batteryIconSize = (textStyle.fontSize ?? 10) * 2.7;
 
       final chapterTitleWidget = Text(
-        (chapterCurrentPage == 1 ? widget.book.title : chapterTitle),
+        (!_isPdf && chapterCurrentPage == 1 ? widget.book.title : chapterTitle),
         style: textStyle,
       );
 
@@ -1469,6 +1794,14 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     String uri = Uri.encodeComponent(widget.book.fileFullPath);
     String url = 'http://127.0.0.1:${Server().port}/book/$uri';
     String initialCfi = widget.cfi ?? widget.book.lastReadPosition;
+    // Marcadores/notas de PDF: `pdf:page=N` se traduce al CFI sintético que
+    // entiende el renderer de página fija al abrir el libro.
+    if (_isPdf) {
+      final page = _pdfPageFromCfi(initialCfi);
+      if (page != null) {
+        initialCfi = 'epubcfi(/6/${page * 2})';
+      }
+    }
 
     return Listener(
       onPointerSignal: (event) {

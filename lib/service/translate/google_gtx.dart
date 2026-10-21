@@ -171,7 +171,9 @@ class GoogleGtx {
   /// Consulta Google Translate probando los endpoints disponibles.
   ///
   /// [maxLength] recorta el texto enviado (0 = sin límite) para no superar el
-  /// tamaño máximo de una URL GET.
+  /// tamaño máximo de una URL GET. A partir de [_postThreshold] caracteres la
+  /// consulta va por POST (`application/x-www-form-urlencoded`), porque una URL
+  /// larga se corta y la petición falla con párrafos grandes.
   static Future<GtxTranslation?> fetch(
     String text, {
     String? sourceLanguage,
@@ -185,24 +187,40 @@ class GoogleGtx {
     final query = (maxLength > 0 && trimmed.length > maxLength)
         ? '${trimmed.substring(0, maxLength)}…'
         : trimmed;
+    final usePost = query.length > _postThreshold;
+    final String source = (sourceLanguage == null || sourceLanguage.isEmpty)
+        ? 'auto'
+        : sourceLanguage;
+    final dt = withDictionary ? '&dt=t&dt=bd&dt=md&dt=rm&dt=ss' : '&dt=t';
 
     Object? lastError;
     for (final endpoint in _gtxEndpoints) {
       final url = endpoint[0];
       final client = endpoint[1];
       try {
-        final uri = Uri.parse(url).replace(queryParameters: {
-          'client': client,
-          'sl': (sourceLanguage == null || sourceLanguage.isEmpty)
-              ? 'auto'
-              : sourceLanguage,
-          'tl': targetLanguage,
-          'q': query,
-        });
-        final dt = withDictionary
-            ? '&dt=t&dt=bd&dt=md&dt=rm&dt=ss'
-            : '&dt=t';
-        final response = await _gtxDio.get('${uri.toString()}$dt');
+        final Response<dynamic> response;
+        if (usePost) {
+          response = await _gtxDio.post(
+            '$url$dt',
+            data: <String, String>{
+              'client': client,
+              'sl': source,
+              'tl': targetLanguage,
+              'q': query,
+            },
+            options: Options(
+              contentType: Headers.formUrlEncodedContentType,
+            ),
+          );
+        } else {
+          final uri = Uri.parse(url).replace(queryParameters: {
+            'client': client,
+            'sl': source,
+            'tl': targetLanguage,
+            'q': query,
+          });
+          response = await _gtxDio.get('${uri.toString()}$dt');
+        }
 
         final body = response.data is String
             ? response.data as String
@@ -227,10 +245,30 @@ class GoogleGtx {
     throw Exception('Google Translate no respondió ($lastError)');
   }
 
+  /// A partir de este tamaño la consulta se envía por POST.
+  static const int _postThreshold = 300;
+
+  /// Tamaño máximo de cada trozo al traducir párrafos largos.
+  static const int _chunkSize = 1200;
+
+  /// Por encima de esto una traducción completa se divide en trozos.
+  static const int _maxSingleRequestLength = 4500;
+
+  /// Fragmentos de texto para la pronunciación de selecciones largas.
+  static const int _maxPhoneticWords = 35;
+
+  static final List<RegExp> _sentenceBreakPatterns = [
+    RegExp(r'[.!?…]\s+'),
+    RegExp(r'[;:]\s+'),
+    RegExp(r'\n+'),
+    RegExp(r'\s+'),
+  ];
+
   /// Traduce de forma inteligente y nunca lanza errores de capacidad.
   ///
   /// * Fragmento ya en [targetLanguage] → explicación / definición.
   /// * Fragmento en otro idioma → traducción + pronunciación figurada + matiz.
+  /// * Párrafos largos → se dividen por oraciones y se traducen por POST.
   static Future<String> smartTranslate(
     String text, {
     required String targetLanguage,
@@ -240,16 +278,44 @@ class GoogleGtx {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return '';
 
+    if (isFullText) {
+      if (trimmed.length <= _maxSingleRequestLength) {
+        final result = await fetch(
+          trimmed,
+          sourceLanguage: sourceLanguage,
+          targetLanguage: targetLanguage,
+          withDictionary: false,
+          maxLength: 0,
+        );
+        if (result == null) {
+          throw Exception('Google Translate no devolvió ninguna traducción');
+        }
+        return result.text;
+      }
+      return _translateChunks(
+        trimmed,
+        sourceLanguage: sourceLanguage,
+        targetLanguage: targetLanguage,
+      );
+    }
+
+    if (trimmed.length > _chunkSize) {
+      return _translateLongText(
+        trimmed,
+        targetLanguage: targetLanguage,
+        sourceLanguage: sourceLanguage,
+      );
+    }
+
     final result = await fetch(
       trimmed,
       sourceLanguage: sourceLanguage,
       targetLanguage: targetLanguage,
-      maxLength: isFullText ? 0 : 2000,
+      maxLength: 2000,
     );
     if (result == null) {
       throw Exception('Google Translate no devolvió ninguna traducción');
     }
-    if (isFullText) return result.text;
 
     final detected =
         (result.detectedLanguage ?? detectLanguageCode(trimmed) ?? '')
@@ -270,6 +336,90 @@ class GoogleGtx {
       targetLanguage: targetLanguage,
       supportTranslation: support,
     );
+  }
+
+  /// Traduce un párrafo largo troceándolo por oraciones.
+  static Future<String> _translateLongText(
+    String text, {
+    required String targetLanguage,
+    String? sourceLanguage,
+  }) async {
+    final detected = (detectLanguageCode(text) ?? '').toLowerCase();
+    final target = targetLanguage.toLowerCase();
+    final sameLanguage =
+        detected.isNotEmpty && _sameLanguage(detected, target);
+    // Si el fragmento ya está en el idioma de destino, se traduce al otro
+    // idioma de la pareja como "sentido general".
+    final supportTarget =
+        sameLanguage ? (target.startsWith('es') ? 'en' : 'es') : target;
+
+    final translated = await _translateChunks(
+      text,
+      sourceLanguage: sourceLanguage,
+      targetLanguage: supportTarget,
+    );
+
+    if (sameLanguage) {
+      return '🧠 Explicación / Definición:\n'
+          '• «${_excerpt(text)}»\n'
+          '• Sentido general: $translated';
+    }
+    final label = target.startsWith('es') ? '🇪🇸 Traducción' : 'Traducción';
+    return '$label:\n$translated';
+  }
+
+  /// Traduce [text] en trozos de [_chunkSize] caracteres y los une.
+  static Future<String> _translateChunks(
+    String text, {
+    String? sourceLanguage,
+    required String targetLanguage,
+  }) async {
+    final chunks = _splitIntoChunks(text, _chunkSize);
+    final parts = <String>[];
+    Object? lastError;
+    for (final chunk in chunks) {
+      try {
+        final result = await fetch(
+          chunk,
+          sourceLanguage: sourceLanguage,
+          targetLanguage: targetLanguage,
+          withDictionary: false,
+          maxLength: 0,
+        );
+        final value = result?.text.trim() ?? '';
+        if (value.isNotEmpty) parts.add(value);
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    if (parts.isEmpty) {
+      throw Exception('Google Translate no devolvió ninguna traducción '
+          '($lastError)');
+    }
+    return parts.join(' ');
+  }
+
+  /// Divide [text] en trozos de como máximo [maxLength] caracteres, cortando
+  /// preferentemente en finales de oración.
+  static List<String> _splitIntoChunks(String text, int maxLength) {
+    final chunks = <String>[];
+    var remaining = text.trim();
+    while (remaining.length > maxLength) {
+      final window = remaining.substring(0, maxLength);
+      var cut = -1;
+      for (final pattern in _sentenceBreakPatterns) {
+        final matches = pattern.allMatches(window);
+        if (matches.isNotEmpty) {
+          cut = matches.last.end;
+          break;
+        }
+      }
+      if (cut <= 0) cut = maxLength;
+      chunks.add(remaining.substring(0, cut).trim());
+      remaining = remaining.substring(cut).trim();
+    }
+    if (remaining.isNotEmpty) chunks.add(remaining);
+    return chunks;
   }
 
   /// Da formato legible al resultado según el idioma detectado.
@@ -510,14 +660,20 @@ class GoogleGtx {
       lines.add('${targetIsSpanish ? '🇪🇸 ' : ''}Traducción: $translation');
     }
 
-    final phonetic = _phonetic(result, detected);
+    // Con selecciones largas la pronunciación completa es ilegible: se muestra
+    // sólo la de las palabras más difíciles (o el inicio de la romanización).
+    final longText = _wordCount(result.sourceText) > _maxPhoneticWords;
+    final phonetic = _phonetic(result, detected, keywordsOnly: longText);
     if (phonetic.isNotEmpty) {
       final isEnglish = detected.startsWith('en');
       // Google devuelve la transcripción IPA en la romanización: se añade
       // junto a la pronunciación figurada para hispanohablantes.
-      final ipa = isEnglish ? (result.romanization?.trim() ?? '') : '';
+      final ipa =
+          (isEnglish && !longText) ? (result.romanization?.trim() ?? '') : '';
       final suffix = (ipa.isNotEmpty && ipa != phonetic) ? ' (IPA: $ipa)' : '';
-      if (targetIsSpanish) {
+      if (longText) {
+        lines.add('🗣️ Pronunciación (palabras clave): [$phonetic]');
+      } else if (targetIsSpanish) {
         lines.add(isEnglish
             ? '🗣️ Cómo se pronuncia (fonética española): [$phonetic]$suffix'
             : '🗣️ Pronunciación aproximada (romanización): [$phonetic]');
@@ -538,7 +694,27 @@ class GoogleGtx {
   }
 
   /// Pronunciación del texto original (no de la traducción).
-  static String _phonetic(GtxTranslation result, String detected) {
+  ///
+  /// Con [keywordsOnly] se limita a las palabras más difíciles del fragmento,
+  /// para que una selección larga no llene la tarjeta de fonética.
+  static String _phonetic(
+    GtxTranslation result,
+    String detected, {
+    bool keywordsOnly = false,
+  }) {
+    if (keywordsOnly) {
+      if (detected.startsWith('en')) {
+        return _keywordPronunciation(result.sourceText);
+      }
+      final romanization = result.romanization?.trim() ?? '';
+      if (romanization.isEmpty) return '';
+      final words = romanization
+          .split(RegExp(r'\s+'))
+          .where((word) => word.isNotEmpty)
+          .toList();
+      if (words.length <= 12) return words.join(' ');
+      return '${words.take(12).join(' ')}…';
+    }
     if (detected.startsWith('en')) {
       return englishPronunciationForSpanish(result.sourceText);
     }
@@ -546,6 +722,65 @@ class GoogleGtx {
     if (romanization.isNotEmpty) return romanization;
     return '';
   }
+
+  /// Pronunciación figurada sólo de las palabras más difíciles (selecciones
+  /// largas en inglés).
+  static String _keywordPronunciation(String text) {
+    final words = text
+        .split(RegExp(r"[^A-Za-zÀ-ÖØ-öø-ÿ'’-]+"))
+        .map((word) => word.trim())
+        .where((word) => word.length >= 6)
+        .toList();
+    if (words.isEmpty) return '';
+
+    final unique = _unique(words);
+    final scored = [...unique]..sort((a, b) {
+        final byDifficulty = _difficultyScore(b).compareTo(_difficultyScore(a));
+        return byDifficulty != 0 ? byDifficulty : a.compareTo(b);
+      });
+
+    final parts = <String>[];
+    for (final word in scored.take(6)) {
+      final respelled = englishPronunciationForSpanish(word);
+      if (respelled.isNotEmpty) {
+        parts.add('$word → $respelled');
+      }
+    }
+    if (parts.isEmpty) return scored.take(4).join(', ');
+    return parts.join(' · ');
+  }
+
+  /// Cuanto más alta, más difícil de pronunciar para un hispanohablante.
+  static int _difficultyScore(String word) {
+    final lower = word.toLowerCase();
+    var score = lower.length;
+    const tricky = [
+      'ough',
+      'augh',
+      'eigh',
+      'tion',
+      'sion',
+      'cious',
+      'tious',
+      'ph',
+      'th',
+      'wh',
+      'kn',
+      'wr',
+      'qu',
+    ];
+    for (final pattern in tricky) {
+      if (lower.contains(pattern)) score += 4;
+    }
+    if (RegExp(r'[^aeiou]{3,}').hasMatch(lower)) score += 2;
+    return score;
+  }
+
+  static int _wordCount(String text) => text
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty)
+      .length;
 
   static String _nuance(GtxTranslation result) {
     final parts = <String>[];

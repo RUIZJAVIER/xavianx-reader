@@ -138,6 +138,13 @@ class ExcerptMenuState extends State<ExcerptMenu> {
     bookNote.setId(id);
     widget.onNoteCreated(id);
 
+    // En PDF los subrayados se pintan sobre el canvas desde la lista de notas:
+    // hay que avisar al visor para que repinte la página al instante.
+    final player = epubPlayerKey.currentState;
+    if (player != null && player.isPdf) {
+      player.addAnnotation(bookNote);
+    }
+
     if (mounted) {
       setState(() {
         _currentNote = bookNote;

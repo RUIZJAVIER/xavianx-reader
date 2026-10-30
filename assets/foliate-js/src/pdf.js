@@ -33,7 +33,8 @@ const textLayerBuilderCSS = `
   position: absolute;
   text-align: initial;
   inset: 0;
-  overflow: hidden;
+  /* overflow visible allows selection to reach the last word of each line */
+  overflow: visible;
   opacity: 0.25;
   line-height: 1;
   text-size-adjust: none;
@@ -1542,6 +1543,8 @@ export const makePDF = async file => {
                 user-select: text;
                 -webkit-user-select: text;
                 line-height: 1.0;
+                /* small right margin so selection handles reach the last char */
+                padding-right: 2px;
             }
             .textLayer :is(span, br) {
                 color: transparent !important;

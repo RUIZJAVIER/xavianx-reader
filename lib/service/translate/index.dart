@@ -326,10 +326,16 @@ Stream<String> smartTranslateSelectionStream(
   LangListEnum? from,
   LangListEnum? to,
   String? contextText,
-  Duration timeout = const Duration(seconds: 4),
+  Duration timeout = const Duration(seconds: 15),
 }) async* {
-  final trimmed = text.trim();
-  if (trimmed.isEmpty) return;
+  // Normalise PDF/selection text: rejoin hyphenated line breaks, collapse
+  // mid-paragraph newlines to spaces, and squeeze multiple spaces.
+  final cleaned = text
+      .replaceAll(RegExp(r'-\s*\n\s*'), '')
+      .replaceAll(RegExp(r'\s*\n\s*'), ' ')
+      .replaceAll(RegExp(r'  +'), ' ')
+      .trim();
+  if (cleaned.isEmpty) return;
 
   final fromLang = from ?? Prefs().translateFrom;
   final toLang = to ?? Prefs().translateTo;
@@ -343,7 +349,7 @@ Stream<String> smartTranslateSelectionStream(
   try {
     final chunks = service.provider
         .translateStream(
-          trimmed,
+          cleaned,
           fromLang,
           toLang,
           contextText: contextText,
@@ -376,7 +382,7 @@ Stream<String> smartTranslateSelectionStream(
   // Respaldo instantáneo: Google GTX, sin errores de capacidad.
   try {
     final result = await GoogleGtx.smartTranslate(
-      trimmed,
+      cleaned,
       targetLanguage: GoogleGtxTranslateProvider().mapLanguageCode(toLang),
       sourceLanguage: fromLang == LangListEnum.auto
           ? null

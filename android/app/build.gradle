@@ -57,11 +57,18 @@ android {
         versionName flutterVersionName
     }
 
+    signingConfigs {
+        release {
+            storeFile file('upload.jks')
+            storePassword 'android'
+            keyAlias 'upload'
+            keyPassword 'android'
+        }
+    }
+
     buildTypes {
         release {
-            // Configuración estándar de Flutter: firma con la clave de debug,
-            // sin keystore externo, para que la compilación nunca falle por firma.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 

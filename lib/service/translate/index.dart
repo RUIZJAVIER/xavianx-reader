@@ -326,7 +326,7 @@ Stream<String> smartTranslateSelectionStream(
   LangListEnum? from,
   LangListEnum? to,
   String? contextText,
-  Duration timeout = const Duration(seconds: 15),
+  Duration timeout = const Duration(seconds: 8),
 }) async* {
   // Normalise PDF/selection text: rejoin hyphenated line breaks, collapse
   // mid-paragraph newlines to spaces, and squeeze multiple spaces.
@@ -354,11 +354,7 @@ Stream<String> smartTranslateSelectionStream(
           toLang,
           contextText: contextText,
         )
-        .timeout(timeout, onTimeout: (sink) {
-      sink.addError(TranslationUnavailableException(
-          'El proveedor no respondió en ${timeout.inSeconds}s'));
-      sink.close();
-    });
+        .timeout(timeout);
 
     await for (final chunk in chunks) {
       final value = chunk.trim();
@@ -372,30 +368,23 @@ Stream<String> smartTranslateSelectionStream(
       yield chunk;
     }
   } catch (e) {
-    AnxLog.warning('Traducción inteligente: cambio a Google GTX ($e)');
+    AnxLog.warning('Traducción inteligente: rescate con Google GTX ($e)');
   }
 
-  // Si el proveedor falló pero ya había escrito una respuesta completa, se
-  // conserva; si era un fragmento corto, GTX la sustituye por una completa.
+  // Si el proveedor completó o emitió una respuesta sustancial, terminamos.
   if (emitted && lastEmitted.trim().length >= 120) return;
 
-  // Respaldo instantáneo: Google GTX, sin errores de capacidad.
+  // Respaldo silencioso e inmediato: Google GTX translateStream.
   try {
-    final result = await GoogleGtx.smartTranslate(
+    yield* GoogleGtxTranslateProvider().translateStream(
       cleaned,
-      targetLanguage: GoogleGtxTranslateProvider().mapLanguageCode(toLang),
-      sourceLanguage: fromLang == LangListEnum.auto
-          ? null
-          : GoogleGtxTranslateProvider().mapLanguageCode(fromLang),
+      fromLang,
+      toLang,
+      contextText: contextText,
     );
-    if (result.trim().isNotEmpty) {
-      yield result;
-      return;
-    }
   } catch (e) {
     AnxLog.warning('Traducción inteligente: Google GTX también falló ($e)');
+    yield 'No se pudo obtener la traducción. Revisa tu conexión e inténtalo '
+        'de nuevo.';
   }
-
-  yield 'No se pudo obtener la traducción. Revisa tu conexión e inténtalo '
-      'de nuevo.';
 }

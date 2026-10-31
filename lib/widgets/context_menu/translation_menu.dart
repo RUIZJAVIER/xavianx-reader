@@ -3,10 +3,7 @@ import 'dart:async';
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/enums/lang_list.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
-import 'package:anx_reader/main.dart';
-import 'package:anx_reader/page/reading_page.dart';
 import 'package:anx_reader/service/translate/index.dart';
-import 'package:anx_reader/utils/env_var.dart';
 import 'package:anx_reader/widgets/common/axis_flex.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -34,8 +31,6 @@ class _TranslationMenuState extends State<TranslationMenu> {
   Timer? _timeoutTimer;
   bool _initialized = false;
   bool _timedOut = false;
-  // true = translate (default), false = explain via AI chat
-  bool _explainMode = false;
 
   /// Último resultado mostrado (para el botón Copiar de la barra inferior).
   String _lastResult = '';
@@ -105,9 +100,9 @@ class _TranslationMenuState extends State<TranslationMenu> {
     });
 
     if (_stream != null) {
-      // Red de seguridad: si en 15 s no llegó nada, se ofrece reintentar en
-      // lugar de dejar la tarjeta en "Pensando..." para siempre.
-      _timeoutTimer = Timer(const Duration(seconds: 15), () {
+      // Red de seguridad: si en 10 s no llegó nada, se ofrece reintentar en
+      // lugar de dejar la tarjeta en carga permanente.
+      _timeoutTimer = Timer(const Duration(seconds: 10), () {
         if (!mounted || _lastResult.trim().isNotEmpty) return;
         setState(() {
           _timedOut = true;
@@ -284,53 +279,6 @@ class _TranslationMenuState extends State<TranslationMenu> {
       crossAxisAlignment: CrossAxisAlignment.center,
       axis: widget.axis,
       children: [
-        // Chip selector: Traducir / Explicar
-        ActionChip(
-          avatar: const Text('🌐', style: TextStyle(fontSize: 14)),
-          label: const Text('Traducir'),
-          visualDensity: VisualDensity.compact,
-          backgroundColor: !_explainMode
-              ? Theme.of(context).colorScheme.primaryContainer
-              : null,
-          onPressed: () {
-            if (_explainMode) setState(() => _explainMode = false);
-          },
-        ),
-        const SizedBox(width: 4),
-        if (EnvVar.enableAIFeature)
-          ActionChip(
-            avatar: const Text('💡', style: TextStyle(fontSize: 14)),
-            label: const Text('Explicar'),
-            visualDensity: VisualDensity.compact,
-            backgroundColor: _explainMode
-                ? Theme.of(context).colorScheme.primaryContainer
-                : null,
-            onPressed: () {
-              if (!_explainMode) {
-                setState(() => _explainMode = true);
-                // Open AI chat with the explain prompt
-                final key = readingPageKey.currentState;
-                if (key == null) return;
-                final playerState = epubPlayerKey.currentState;
-                final bookTitle =
-                    playerState?.book.title ?? L10n.of(context).navBarAI;
-                final chapter = playerState?.chapterTitle ?? '';
-                final buffer = StringBuffer()
-                  ..writeln(
-                    'Explica con claridad y de forma concisa el siguiente fragmento '
-                    'de «$bookTitle»${chapter.isEmpty ? '' : ' (capítulo $chapter)'} '
-                    'en español:',
-                  )
-                  ..writeln()
-                  ..write('«${widget.content.trim()}»');
-                key.showAiChat(
-                  content: buffer.toString(),
-                  sendImmediate: true,
-                );
-              }
-            },
-          ),
-        if (widget.axis == Axis.horizontal) const Spacer(),
         _langPicker(true),
         Transform.rotate(
             angle: widget.axis == Axis.horizontal ? 0 : 1.57,

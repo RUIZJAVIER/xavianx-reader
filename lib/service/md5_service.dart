@@ -7,6 +7,16 @@ import 'package:anx_reader/models/md5_statistics.dart';
 import 'package:anx_reader/utils/log/common.dart';
 import 'package:crypto/crypto.dart';
 
+class _DigestSink implements Sink<Digest> {
+  Digest? value;
+
+  @override
+  void add(Digest data) => value = data;
+
+  @override
+  void close() {}
+}
+
 class MD5Service {
   static Future<String?> calculateFileMd5(String filePath) async {
     try {
@@ -15,9 +25,15 @@ class MD5Service {
         return null;
       }
 
-      final bytes = await file.readAsBytes();
-      final digest = md5.convert(bytes);
-      return digest.toString();
+      // Hash por trozos: nunca se carga el libro entero en memoria, clave al
+      // importar lotes grandes de archivos.
+      final sink = _DigestSink();
+      final input = md5.startChunkedConversion(sink);
+      await for (final chunk in file.openRead()) {
+        input.add(chunk);
+      }
+      input.close();
+      return sink.value?.toString();
     } catch (e) {
       AnxLog.severe('Error calculating MD5 for $filePath: $e');
       return null;

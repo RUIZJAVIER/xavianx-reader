@@ -99,9 +99,13 @@ class BookshelfPageState extends ConsumerState<BookshelfPage>
     // but on Android it will return files with temporary path.
     // So we need to save the files to the temp directory.
     if (!AnxPlatform.isAndroid) {
-      fileList = await Future.wait(files.map((file) async {
-        return _copyToTempFile(sourcePath: file.path!, fileName: file.name);
-      }).toList());
+      // Copia secuencial: copiar decenas de libros a la vez agota la memoria.
+      for (final file in files) {
+        fileList.add(await _copyToTempFile(
+          sourcePath: file.path!,
+          fileName: file.name,
+        ));
+      }
     } else {
       fileList = files.map((file) => File(file.path!)).toList();
     }

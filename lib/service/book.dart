@@ -373,6 +373,11 @@ void _showImportDialog(
                             errorFiles.add(file.path);
                             errorMessages[file.path] = e.toString();
                           });
+                        } finally {
+                          // Libera el WebView de metadatos antes del siguiente
+                          // libro: evita acumular memoria al importar lotes.
+                          await headlessInAppWebView?.dispose();
+                          headlessInAppWebView = null;
                         }
                       }
 

@@ -28,9 +28,7 @@ class TranslationMenu extends StatefulWidget {
 class _TranslationMenuState extends State<TranslationMenu> {
   Stream<String>? _stream;
   Timer? _debounceTimer;
-  Timer? _timeoutTimer;
   bool _initialized = false;
-  bool _timedOut = false;
 
   /// Último resultado mostrado (para el botón Copiar de la barra inferior).
   String _lastResult = '';
@@ -79,12 +77,10 @@ class _TranslationMenuState extends State<TranslationMenu> {
     final to = Prefs().translateTo;
     final service = Prefs().translateService;
 
-    _timeoutTimer?.cancel();
     setState(() {
       _from = from;
       _to = to;
       _service = service;
-      _timedOut = false;
       _lastResult = '';
       // Los proveedores WebView se dibujan con su propio widget; el resto
       // usa el flujo inteligente (proveedor configurado + respaldo GTX).
@@ -98,27 +94,14 @@ class _TranslationMenuState extends State<TranslationMenu> {
             );
       _initialized = true;
     });
-
-    if (_stream != null) {
-      // Red de seguridad: si en 10 s no llegó nada, se ofrece reintentar en
-      // lugar de dejar la tarjeta en carga permanente.
-      _timeoutTimer = Timer(const Duration(seconds: 10), () {
-        if (!mounted || _lastResult.trim().isNotEmpty) return;
-        setState(() {
-          _timedOut = true;
-        });
-      });
-    }
   }
 
   void _retranslate() {
     if (!mounted) return;
     _debounceTimer?.cancel();
-    _timeoutTimer?.cancel();
     setState(() {
       _initialized = false;
       _stream = null;
-      _timedOut = false;
       _lastResult = '';
     });
     _startTranslation();
@@ -134,7 +117,6 @@ class _TranslationMenuState extends State<TranslationMenu> {
   @override
   void dispose() {
     _debounceTimer?.cancel();
-    _timeoutTimer?.cancel();
     super.dispose();
   }
 
@@ -223,17 +205,6 @@ class _TranslationMenuState extends State<TranslationMenu> {
     );
   }
 
-  Widget _retry() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
-        onPressed: _retranslate,
-        icon: const Icon(Icons.refresh, size: 18),
-        label: Text(L10n.of(context).commonRetry),
-      ),
-    );
-  }
-
   Widget _resultBox(String text) {
     // El botón Copiar vive en la barra inferior fija; aquí sólo va el texto,
     // que se desplaza dentro del área superior.
@@ -266,7 +237,6 @@ class _TranslationMenuState extends State<TranslationMenu> {
             return _resultBox(text);
           }
         }
-        if (_timedOut) return _retry();
         return _loading();
       },
     );

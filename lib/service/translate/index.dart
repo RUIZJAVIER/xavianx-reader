@@ -346,7 +346,6 @@ Stream<String> smartTranslateSelectionStream(
 
   var emitted = false;
   var lastEmitted = '';
-  var fellBack = false;
 
   Stream<String> gtxFallback() => GoogleGtxTranslateProvider().translateStream(
         cleaned,
@@ -364,12 +363,10 @@ Stream<String> smartTranslateSelectionStream(
           contextText: contextText,
         )
         .timeout(timeout)
-        // Cualquier excepción o silencio del proveedor se sustituye en el acto
-        // por Google GTX: la tarjeta nunca recibe un error.
-        .catchError((Object e) {
+        // El error no llega a la tarjeta: se absorbe aquí y el respaldo Google
+        // GTX se ejecuta justo después.
+        .handleError((Object e) {
       AnxLog.warning('Traducción inteligente: rescate con Google GTX ($e)');
-      fellBack = true;
-      return gtxFallback();
     });
 
     await for (final chunk in chunks) {
@@ -389,14 +386,6 @@ Stream<String> smartTranslateSelectionStream(
 
   // Si el proveedor completó o emitió una respuesta sustancial, terminamos.
   if (emitted && lastEmitted.trim().length >= 120) return;
-
-  // El catchError ya ejecutó Google GTX; no se repite la petición.
-  if (fellBack) {
-    if (emitted) return;
-    yield 'No se pudo obtener la traducción. Revisa tu conexión e inténtalo '
-        'de nuevo.';
-    return;
-  }
 
   // Respaldo silencioso e inmediato: Google GTX translateStream.
   try {

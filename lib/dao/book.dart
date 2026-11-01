@@ -1,5 +1,6 @@
 import 'package:anx_reader/dao/base_dao.dart';
 import 'package:anx_reader/models/book.dart';
+import 'package:anx_reader/utils/text/search_normalize.dart';
 
 class BookDao extends BaseDao {
   BookDao();
@@ -77,17 +78,51 @@ class BookDao extends BaseDao {
   }
 
   Future<List<Book>> searchBooks(String keyword) async {
-    final query = keyword.trim();
-    if (query.isEmpty) {
+    if (keyword.trim().isEmpty) {
       return const [];
+    }
+    return searchBooksPage(keyword: keyword);
+  }
+
+  /// Title/author search with SQL-level filtering and pagination. The keyword
+  /// comparison ignores accents, so "quimica" matches "Química".
+  Future<List<Book>> searchBooksPage({
+    String? keyword,
+    int? groupId,
+    bool includeDeleted = false,
+    int? limit,
+    int offset = 0,
+  }) {
+    final query = keyword?.trim() ?? '';
+    final conditions = <String>[];
+    final args = <Object?>[];
+
+    if (!includeDeleted) {
+      conditions.add('is_deleted = 0');
+    }
+    if (groupId != null) {
+      conditions.add('group_id = ?');
+      args.add(groupId);
+    }
+    if (query.isNotEmpty) {
+      // shortcut: folding accents with REPLACE means a table scan; add a
+      // normalized column if large libraries make search slow.
+      final like = '%${normalizeForSearch(query)}%';
+      conditions.add(
+        '(${accentInsensitiveSql('title')} LIKE ? OR '
+        '${accentInsensitiveSql('author')} LIKE ?)',
+      );
+      args..add(like)..add(like);
     }
 
     return queryList(
       table,
       mapper: Book.fromDb,
-      where: 'is_deleted = 0 AND (title LIKE ? OR author LIKE ?)',
-      whereArgs: ['%$query%', '%$query%'],
+      where: conditions.isEmpty ? null : conditions.join(' AND '),
+      whereArgs: args,
       orderBy: 'update_time DESC',
+      limit: limit,
+      offset: limit == null ? null : offset,
     );
   }
 

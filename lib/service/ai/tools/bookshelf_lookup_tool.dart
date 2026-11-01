@@ -13,14 +13,14 @@ class BookshelfLookupTool
       : super(
           name: 'bookshelf_lookup',
           description:
-              'Find books that already exist on the user\'s local shelf based on title, author, or group membership. Use this before referencing a book in replies so you can cite real items from the library. Supports optional filters for bookshelf groups, deleted books, and result limits. Returns a structured list of matching books with identifiers, metadata, progress, and last-read timestamps.',
+              'Find books that already exist on the user\'s local shelf based on title, author, or group membership. Use this before referencing a book in replies so you can cite real items from the library. Supports optional filters for bookshelf groups and deleted books. Results are paginated: the response returns at most `limit` books, and you can call the tool again with a higher `offset` to fetch the next page. Returns a structured list of matching books with identifiers, metadata, progress, and last-read timestamps.',
           inputJsonSchema: const {
             'type': 'object',
             'properties': {
               'query': {
                 'type': 'string',
                 'description':
-                    'Optional. Text to match against book titles or authors. Omit when you want to list everything in a group.',
+                    'Optional. Text to match against book titles or authors (accent-insensitive). Omit when you want to list everything in a group.',
               },
               'group_id': {
                 'type': 'integer',
@@ -35,7 +35,12 @@ class BookshelfLookupTool
               'limit': {
                 'type': 'integer',
                 'description':
-                    'Optional. Upper bound on the number of books to return (range 1-50; backend default used if omitted).',
+                    'Optional. Maximum number of books to return (range 1-100; defaults to 100).',
+              },
+              'offset': {
+                'type': 'integer',
+                'description':
+                    'Optional. Number of matching books to skip before returning results (defaults to 0). Use it with `limit` to page through large libraries.',
               },
             },
           },
@@ -56,12 +61,14 @@ class BookshelfLookupTool
       groupId: input.groupId,
       includeDeleted: input.includeDeleted,
       limit: input.resolvedLimit(),
+      offset: input.resolvedOffset(),
     );
 
     return {
       'query': input.query,
       'groupId': input.groupId,
       'includeDeleted': input.includeDeleted,
+      'offset': input.resolvedOffset(),
       'results': results.map((entry) => entry.toMap()).toList(),
     };
   }

@@ -964,5 +964,14 @@
   "notesJsonImportInvalid": "Invalid notes JSON format",
   "settingsSyncWebdavUrlHint": "Enter a writable directory URL. The app creates an anx/ folder under it for sync data.",
   "settingsAdvancedTrustUserCertificates": "Trust user / custom CA certificates",
-  "settingsAdvancedTrustUserCertificatesDesc": "Allow HTTPS with user-installed or self-signed certificates (e.g. private Nextcloud). Off by default; keep off on untrusted networks."
+  "settingsAdvancedTrustUserCertificatesDesc": "Allow HTTPS with user-installed or self-signed certificates (e.g. private Nextcloud). Off by default; keep off on untrusted networks.",
+  "vocabularyTitle": "Vocabulary",
+  "vocabularySave": "Save word",
+  "vocabularyIslandLabel": "Language island (optional)",
+  "vocabularyIslandHint": "Blank = AI picks it from the context",
+  "vocabularySaved": "Word saved to vocabulary",
+  "vocabularyExport": "Export vocabulary (CSV for Anki)",
+  "vocabularyExportEmpty": "No vocabulary words to export yet",
+  "aiToolManageVocabularyName": "Manage Vocabulary",
+  "aiToolManageVocabularyDescription": "Read and update saved words and their language islands. Use it to inject a mnemonic story or two native lifeline sentences for the word."
 }

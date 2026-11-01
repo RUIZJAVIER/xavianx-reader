@@ -39,25 +39,16 @@ class BooksRepository {
     int? groupId,
     bool includeDeleted = false,
     int limit = 10,
+    int offset = 0,
   }) async {
     final query = keyword?.trim() ?? '';
-
-    List<Book> books;
-    if (query.isEmpty) {
-      books = await bookDao.selectBooks();
-    } else {
-      books = await bookDao.searchBooks(query);
-    }
-
-    if (!includeDeleted) {
-      books = books.where((book) => !book.isDeleted).toList();
-    }
-
-    if (groupId != null) {
-      books = books.where((book) => book.groupId == groupId).toList();
-    }
-
-    final sliced = books.take(limit).toList();
-    return sliced.map(BookSearchResult.new).toList();
+    final books = await bookDao.searchBooksPage(
+      keyword: query,
+      groupId: groupId,
+      includeDeleted: includeDeleted,
+      limit: limit,
+      offset: offset,
+    );
+    return books.map(BookSearchResult.new).toList();
   }
 }

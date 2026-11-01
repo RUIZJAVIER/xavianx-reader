@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:anx_reader/dao/book.dart';
@@ -17,6 +18,7 @@ import 'package:anx_reader/providers/sync.dart';
 import 'package:anx_reader/providers/iap.dart';
 import 'package:anx_reader/providers/book_list.dart';
 import 'package:anx_reader/providers/toc_search.dart';
+import 'package:anx_reader/service/ai/auto_tag_book.dart';
 import 'package:anx_reader/service/convert_to_epub/txt/convert_from_txt.dart';
 import 'package:anx_reader/service/md5_service.dart';
 import 'package:anx_reader/utils/webView/anx_headless_webview.dart';
@@ -552,6 +554,7 @@ Future<void> saveBook(
       updateTime: DateTime.now());
 
   book.id = await bookDao.insertBook(book);
+  unawaited(autoTagBook(book));
   AnxToast.show(L10n.of(navigatorKey.currentContext!).serviceImportSuccess);
   await headlessInAppWebView?.dispose();
   headlessInAppWebView = null;

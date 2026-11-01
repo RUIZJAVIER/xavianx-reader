@@ -1,7 +1,9 @@
 import 'package:anx_reader/config/shared_preference_provider.dart';
+import 'package:anx_reader/dao/vocabulary.dart';
 import 'package:anx_reader/enums/lang_list.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/service/translate/index.dart';
+import 'package:anx_reader/service/vocabulary/vocabulary_service.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/widgets/common/container/filled_container.dart';
 import 'package:anx_reader/widgets/settings/service_config_form.dart';
@@ -30,6 +32,23 @@ class _TranslateSettingState extends State<TranslateSetting> {
       ),
       title: Text(L10n.of(context).readingPageAutoTranslateSelection),
     );
+  }
+
+  Future<void> _exportVocabulary() async {
+    final l10n = L10n.of(context);
+    final items = await vocabularyDao.fetchAll();
+    if (items.isEmpty) {
+      AnxToast.show(l10n.vocabularyExportEmpty);
+      return;
+    }
+    try {
+      final path = await exportVocabularyCsv(items);
+      if (path != null) {
+        AnxToast.show('${l10n.notesPageExportedTo} $path');
+      }
+    } catch (e) {
+      AnxToast.show('${l10n.commonFailed}: $e');
+    }
   }
 
   @override
@@ -113,6 +132,16 @@ class _TranslateSettingState extends State<TranslateSetting> {
                   ),
                 ),
               ),
+            ),
+          ],
+        ),
+        SettingsSection(
+          title: Text(L10n.of(context).vocabularyTitle),
+          tiles: [
+            SettingsTile.navigation(
+              leading: const Icon(Icons.upload_file_outlined),
+              title: Text(L10n.of(context).vocabularyExport),
+              onPressed: (_) => _exportVocabulary(),
             ),
           ],
         ),

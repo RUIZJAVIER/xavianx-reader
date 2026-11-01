@@ -4,6 +4,8 @@ import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/enums/lang_list.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/service/translate/index.dart';
+import 'package:anx_reader/service/vocabulary/vocabulary_service.dart';
+import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/widgets/common/axis_flex.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -124,6 +126,54 @@ class _TranslationMenuState extends State<TranslationMenu> {
     final text = _lastResult.trim();
     if (text.isEmpty) return;
     Clipboard.setData(ClipboardData(text: text));
+  }
+
+  Future<void> _saveVocabulary() async {
+    final definition = _lastResult.trim();
+    if (definition.isEmpty) return;
+
+    final islandController = TextEditingController();
+    final island = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(L10n.of(dialogContext).vocabularySave),
+        content: TextField(
+          controller: islandController,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: L10n.of(dialogContext).vocabularyIslandLabel,
+            hintText: L10n.of(dialogContext).vocabularyIslandHint,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(L10n.of(dialogContext).commonCancel),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, islandController.text),
+            child: Text(L10n.of(dialogContext).commonSave),
+          ),
+        ],
+      ),
+    );
+    islandController.dispose();
+    if (island == null || !mounted) return;
+
+    try {
+      await saveVocabulary(
+        word: widget.content,
+        definition: definition,
+        contextSentence: widget.contextText,
+        languageIsland: island,
+      );
+      if (!mounted) return;
+      AnxToast.show(L10n.of(context).vocabularySaved);
+    } catch (e) {
+      if (!mounted) return;
+      AnxToast.show('${L10n.of(context).commonFailed}: $e');
+    }
   }
 
   Widget _langPicker(bool isFrom) {
@@ -255,6 +305,14 @@ class _TranslationMenuState extends State<TranslationMenu> {
             child: const Icon(Icons.arrow_forward_ios, size: 16)),
         _langPicker(false),
         if (widget.axis == Axis.horizontal) const Spacer(),
+        // Guarda la palabra y su definición en el vocabulario (Anki).
+        if (!_service.isWebView)
+          IconButton(
+            tooltip: L10n.of(context).vocabularySave,
+            onPressed: canCopy ? _saveVocabulary : null,
+            icon: const Icon(Icons.push_pin_outlined, size: 18),
+            visualDensity: VisualDensity.compact,
+          ),
         // Los proveedores WebView traen su propia interfaz (y su propio botón
         // de copiar): no se duplica aquí.
         if (!_service.isWebView)

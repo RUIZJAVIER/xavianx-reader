@@ -13,7 +13,7 @@ import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 // Current app database version
-const int currentDbVersion = 7;
+const int currentDbVersion = 8;
 
 const createBookSQL = '''
 CREATE TABLE tb_books (
@@ -94,6 +94,18 @@ CREATE TABLE tb_groups (
   create_time TEXT,
   update_time TEXT,
   FOREIGN KEY (parent_id) REFERENCES tb_groups(id)
+)
+''';
+
+const createVocabularySQL = '''
+CREATE TABLE IF NOT EXISTS vocabulary (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  word TEXT,
+  context_sentence TEXT,
+  definition TEXT,
+  association_mnemonic TEXT,
+  language_island TEXT,
+  timestamp TEXT
 )
 ''';
 
@@ -442,6 +454,11 @@ class DBHelper {
             VALUES (?, '...', 0, datetime('now'), datetime('now'))
           ''', [groupId]);
         }
+        continue case7;
+      case7:
+      case 7:
+        // vocabulary / Anki island storage
+        await db.execute(createVocabularySQL);
     }
 
     if (oldVersion != 0 && Prefs().webdavStatus) {

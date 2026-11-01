@@ -902,5 +902,14 @@
   "aiModelSwitchTitle": "Cambiar modelo",
   "aiModelEnterManually": "Ingrese nombre del modelo",
   "aiModelOrSelectBelow": "O seleccione de la lista:",
-  "aiChatFontSize": "Tamaño de fuente"
+  "aiChatFontSize": "Tamaño de fuente",
+  "vocabularyTitle": "Vocabulario",
+  "vocabularySave": "Guardar palabra",
+  "vocabularyIslandLabel": "Isla lingüística (opcional)",
+  "vocabularyIslandHint": "Vacío = la IA la deduce del contexto",
+  "vocabularySaved": "Palabra guardada en el vocabulario",
+  "vocabularyExport": "Exportar vocabulario (CSV para Anki)",
+  "vocabularyExportEmpty": "Todavía no hay palabras para exportar",
+  "aiToolManageVocabularyName": "Gestionar vocabulario",
+  "aiToolManageVocabularyDescription": "Lee y actualiza las palabras guardadas y sus islas lingüísticas. Úsala para inyectar una historia mnemotécnica o 2 frases salvavidas nativas para la palabra."
 }

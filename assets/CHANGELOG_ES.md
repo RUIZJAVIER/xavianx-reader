@@ -1,5 +1,7 @@
 ## 1.15.0
-- Versión actual: Integración de IA, paginación de biblioteca y sistema de Flashcards
+- Versión actual: Integración de IA, repetición espaciada nativa, auto-clasificación y flashcards enriquecidas
+- Feat(vocabulary): repetición espaciada SM-2 con botones Olvidé, Difícil, Bien y Fácil
+- Feat(vocabulary): edición de tarjetas con negritas, cursivas y colores compatibles con Anki
 - Feat(ai): herramientas de IA para organizar la biblioteca y etiquetar libros automáticamente
 - Feat(ai): vocabulario con islas lingüísticas y mnemotecnia generadas por IA
 - Feat(bookshelf): biblioteca paginada con búsqueda que ignora tildes

@@ -13,7 +13,7 @@ import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 // Current app database version
-const int currentDbVersion = 8;
+const int currentDbVersion = 9;
 
 const createBookSQL = '''
 CREATE TABLE tb_books (
@@ -105,7 +105,11 @@ CREATE TABLE IF NOT EXISTS vocabulary (
   definition TEXT,
   association_mnemonic TEXT,
   language_island TEXT,
-  timestamp TEXT
+  timestamp TEXT,
+  efactor REAL NOT NULL DEFAULT 2.5,
+  repetition INTEGER NOT NULL DEFAULT 0,
+  interval INTEGER NOT NULL DEFAULT 0,
+  next_review_date INTEGER NOT NULL DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000)
 )
 ''';
 
@@ -459,6 +463,24 @@ class DBHelper {
       case 7:
         // vocabulary / Anki island storage
         await db.execute(createVocabularySQL);
+        continue case8;
+      case8:
+      case 8:
+        // SM-2 spaced repetition state. Fresh installs already have it.
+        final columns = await db.rawQuery('PRAGMA table_info(vocabulary)');
+        if (!columns.any((column) => column['name'] == 'efactor')) {
+          await db.execute(
+              'ALTER TABLE vocabulary ADD COLUMN efactor REAL NOT NULL DEFAULT 2.5');
+          await db.execute(
+              'ALTER TABLE vocabulary ADD COLUMN repetition INTEGER NOT NULL DEFAULT 0');
+          await db.execute(
+              'ALTER TABLE vocabulary ADD COLUMN interval INTEGER NOT NULL DEFAULT 0');
+          await db.execute(
+              'ALTER TABLE vocabulary ADD COLUMN next_review_date INTEGER NOT NULL DEFAULT 0');
+          // Existing cards become due right after the upgrade.
+          await db.execute(
+              "UPDATE vocabulary SET next_review_date = CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE next_review_date = 0");
+        }
     }
 
     if (oldVersion != 0 && Prefs().webdavStatus) {

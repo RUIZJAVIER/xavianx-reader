@@ -169,7 +169,14 @@ class _TranslationMenuState extends State<TranslationMenu> {
         languageIsland: island,
       );
       if (!mounted) return;
-      AnxToast.show(L10n.of(context).vocabularySaved);
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      if (messenger != null) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(L10n.of(context).vocabularySaved)),
+        );
+      } else {
+        AnxToast.show(L10n.of(context).vocabularySaved);
+      }
     } catch (e) {
       if (!mounted) return;
       AnxToast.show('${L10n.of(context).commonFailed}: $e');

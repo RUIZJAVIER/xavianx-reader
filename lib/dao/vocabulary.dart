@@ -33,6 +33,62 @@ class VocabularyDao extends BaseDao {
     );
   }
 
+  Future<List<Vocabulary>> fetchDue({DateTime? now}) {
+    return queryList(
+      table,
+      mapper: Vocabulary.fromDb,
+      where: 'next_review_date <= ?',
+      whereArgs: [(now ?? DateTime.now()).millisecondsSinceEpoch],
+      orderBy: 'next_review_date ASC',
+    );
+  }
+
+  Future<int> countDue({DateTime? now}) async {
+    final count = await rawQuerySingle(
+      'SELECT COUNT(*) AS total FROM $table WHERE next_review_date <= ?',
+      arguments: [(now ?? DateTime.now()).millisecondsSinceEpoch],
+      mapper: (row) => row['total'] as int,
+    );
+    return count ?? 0;
+  }
+
+  Future<bool> updateCard(Vocabulary card) async {
+    final updated = await update(
+      table,
+      {
+        'word': card.word,
+        'context_sentence': card.contextSentence,
+        'definition': card.definition,
+        'association_mnemonic': card.associationMnemonic,
+        'language_island': card.languageIsland,
+      },
+      where: 'id = ?',
+      whereArgs: [card.id],
+    );
+    return updated > 0;
+  }
+
+  Future<bool> updateSrs(
+    int id, {
+    required double efactor,
+    required int repetition,
+    required int interval,
+    required int nextReviewDate,
+  }) async {
+    final updated = await update(
+      table,
+      {
+        'efactor': efactor,
+        'repetition': repetition,
+        'interval': interval,
+        'next_review_date': nextReviewDate,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    return updated > 0;
+  }
+
   Future<bool> updateFields(
     int id, {
     String? associationMnemonic,

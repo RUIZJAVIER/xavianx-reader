@@ -60,6 +60,7 @@ Future<int> saveVocabulary({
   required String definition,
   String? contextSentence,
   String? languageIsland,
+  String? associationMnemonic,
 }) async {
   final trimmedIsland = languageIsland?.trim() ?? '';
   final island = trimmedIsland.isNotEmpty
@@ -69,6 +70,7 @@ Future<int> saveVocabulary({
           definition: definition,
           contextSentence: contextSentence,
         );
+  final mnemonic = associationMnemonic?.trim();
 
   return vocabularyDao.save(
     Vocabulary(
@@ -76,10 +78,57 @@ Future<int> saveVocabulary({
       word: word.trim(),
       contextSentence: contextSentence?.trim() ?? '',
       definition: definition.trim(),
-      associationMnemonic: null,
+      associationMnemonic:
+          mnemonic == null || mnemonic.isEmpty ? null : mnemonic,
       languageIsland: island,
       timestamp: DateTime.now(),
+      nextReviewDate: DateTime.now().millisecondsSinceEpoch,
     ),
+  );
+}
+
+typedef Sm2Update = ({
+  double efactor,
+  int repetition,
+  int interval,
+  int nextReviewDate,
+});
+
+/// Applies one SM-2 answer (0-5) and returns the next scheduling state.
+Sm2Update applySm2({
+  required int quality,
+  required double efactor,
+  required int repetition,
+  required int interval,
+  DateTime? now,
+}) {
+  final q = quality.clamp(0, 5).toInt();
+  var nextEfactor = efactor + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
+  if (nextEfactor < 1.3) nextEfactor = 1.3;
+
+  int nextRepetition;
+  int nextInterval;
+  if (q < 3) {
+    nextRepetition = 0;
+    nextInterval = 1;
+  } else {
+    nextRepetition = repetition + 1;
+    if (repetition == 0) {
+      nextInterval = 1;
+    } else if (repetition == 1) {
+      nextInterval = 6;
+    } else {
+      // SM-2 grows the interval with the EF from before this answer.
+      nextInterval = (interval * efactor).round();
+    }
+  }
+
+  final nextDate = (now ?? DateTime.now()).add(Duration(days: nextInterval));
+  return (
+    efactor: nextEfactor,
+    repetition: nextRepetition,
+    interval: nextInterval,
+    nextReviewDate: nextDate.millisecondsSinceEpoch,
   );
 }
 

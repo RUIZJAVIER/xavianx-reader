@@ -14,6 +14,7 @@ import 'package:anx_reader/providers/book_filters.dart';
 import 'package:anx_reader/providers/tags.dart';
 import 'package:anx_reader/service/book.dart';
 import 'package:anx_reader/page/search/search_page.dart';
+import 'package:anx_reader/page/home_page/vocabulary_page.dart';
 import 'package:anx_reader/utils/get_path/get_temp_dir.dart';
 import 'package:anx_reader/utils/color/hash_color.dart';
 import 'package:anx_reader/utils/pick_file.dart';
@@ -573,6 +574,13 @@ class BookshelfPageState extends ConsumerState<BookshelfPage>
             ),
           )),
       actions: [
+        IconButton(
+          tooltip: L10n.of(context).vocabularyCardsTitle,
+          icon: const Icon(Icons.style_outlined),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const VocabularyPage()),
+          ),
+        ),
         const SyncButton(),
         IconButton(
           icon: const Icon(Icons.add),

@@ -907,9 +907,12 @@
   "vocabularySave": "Guardar palabra",
   "vocabularyIslandLabel": "Isla lingüística (opcional)",
   "vocabularyIslandHint": "Vacío = la IA la deduce del contexto",
-  "vocabularySaved": "Palabra guardada en el vocabulario",
+  "vocabularySaved": "Palabra guardada correctamente",
   "vocabularyExport": "Exportar vocabulario (CSV para Anki)",
   "vocabularyExportEmpty": "Todavía no hay palabras para exportar",
+  "vocabularyCardsTitle": "Tarjetas / Vocabulario",
+  "vocabularyCardsEmpty": "Aún no hay palabras guardadas. Selecciona una palabra mientras lees y guárdala desde el menú de traducción.",
+  "vocabularyExportToAnki": "Exportar a CSV (Anki)",
   "aiToolManageVocabularyName": "Gestionar vocabulario",
   "aiToolManageVocabularyDescription": "Lee y actualiza las palabras guardadas y sus islas lingüísticas. Úsala para inyectar una historia mnemotécnica o 2 frases salvavidas nativas para la palabra."
 }

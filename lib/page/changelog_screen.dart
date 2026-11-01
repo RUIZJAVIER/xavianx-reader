@@ -1,3 +1,4 @@
+import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/utils/get_current_language_code.dart';
 import 'package:anx_reader/widgets/markdown/styled_markdown.dart';
@@ -29,6 +30,8 @@ class _ChangelogScreenState extends State<ChangelogScreen> {
 
   String get currentVersion => widget.currentVersion.split('+').first;
   String get lastVersion => widget.lastVersion.split('+').first;
+  bool get _isSpanish =>
+      (Prefs().locale?.languageCode ?? getCurrentLanguageCode()) == 'es';
 
   @override
   void initState() {
@@ -37,16 +40,18 @@ class _ChangelogScreenState extends State<ChangelogScreen> {
   }
 
   Future<void> _loadChangelog() async {
+    final isSpanish = _isSpanish;
     try {
-      // Load changelog from assets
-      final String fullChangelog =
-          await rootBundle.loadString('assets/CHANGELOG.md');
+      // Spanish has its own file; the default changelog is English + Chinese.
+      final String fullChangelog = await rootBundle.loadString(
+          isSpanish ? 'assets/CHANGELOG_ES.md' : 'assets/CHANGELOG.md');
       _changelogContent = _extractVersionChangelog(fullChangelog);
     } catch (e) {
       AnxLog.warning('Failed to load changelog from assets: $e');
       _changelogContent = _getDefaultChangelog();
     } finally {
-      _changelogContent = processChangelogContent(_changelogContent);
+      _changelogContent =
+          processChangelogContent(_changelogContent, localized: isSpanish);
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -55,7 +60,7 @@ class _ChangelogScreenState extends State<ChangelogScreen> {
     }
   }
 
-  String processChangelogContent(String content) {
+  String processChangelogContent(String content, {bool localized = false}) {
     bool isChinese() => getCurrentLanguageCode().startsWith('zh');
 
     final lines = content.split('\n');
@@ -71,6 +76,9 @@ class _ChangelogScreenState extends State<ChangelogScreen> {
         processedLines.add(line);
         continue;
       }
+    }
+    if (localized) {
+      return processedLines.join('\n');
     }
     if (isChinese()) {
       processedLines = processedLines.sublist(processedLines.length ~/ 2);
@@ -122,6 +130,11 @@ class _ChangelogScreenState extends State<ChangelogScreen> {
   }
 
   String _getDefaultChangelog() {
+    if (_isSpanish) {
+      return '''
+- Correcciones de errores y mejoras de estabilidad
+''';
+    }
     return '''
 - Fixed some bugs
 - 修复已知问题

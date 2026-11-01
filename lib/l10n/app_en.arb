@@ -969,9 +969,12 @@
   "vocabularySave": "Save word",
   "vocabularyIslandLabel": "Language island (optional)",
   "vocabularyIslandHint": "Blank = AI picks it from the context",
-  "vocabularySaved": "Word saved to vocabulary",
+  "vocabularySaved": "Word saved successfully",
   "vocabularyExport": "Export vocabulary (CSV for Anki)",
   "vocabularyExportEmpty": "No vocabulary words to export yet",
+  "vocabularyCardsTitle": "Flashcards / Vocabulary",
+  "vocabularyCardsEmpty": "No saved words yet. Select a word while reading and save it from the translation menu.",
+  "vocabularyExportToAnki": "Export to CSV (Anki)",
   "aiToolManageVocabularyName": "Manage Vocabulary",
   "aiToolManageVocabularyDescription": "Read and update saved words and their language islands. Use it to inject a mnemonic story or two native lifeline sentences for the word."
 }

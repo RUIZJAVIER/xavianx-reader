@@ -303,7 +303,9 @@ class CancelableLangchainRunner {
               try {
                 toolInput = tool.getInputFromJson(inputJson);
               } catch (e) {
-                message = 'Invalid tool input: $e';
+                message = e is FormatException
+                    ? e.message
+                    : 'Invalid tool input: $e';
               }
               final observation = message == null
                   ? await tool.invoke(toolInput)

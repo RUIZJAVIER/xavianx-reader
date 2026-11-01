@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:anx_reader/service/ai/tools/tool_args.dart';
 import 'package:anx_reader/utils/log/common.dart';
 import 'package:langchain_core/tools.dart';
 
@@ -33,7 +34,7 @@ abstract class RepositoryTool<I extends Object, O> {
     description: description,
     inputJsonSchema: inputJsonSchema,
     func: (input) async => _execute(input),
-    getInputFromJson: parseInput,
+    getInputFromJson: (json) => parseInput(sanitizeToolArgs(json)),
   );
 
   Tool get tool => _tool;

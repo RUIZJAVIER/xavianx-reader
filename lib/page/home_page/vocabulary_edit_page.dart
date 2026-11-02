@@ -143,10 +143,21 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
         ));
       }
       if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.green,
+          content: Text(l10n.vocabularySaved),
+        ),
+      );
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
-      AnxToast.show('${l10n.commonFailed}: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.red,
+          content: Text('${l10n.commonFailed}: $e'),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }

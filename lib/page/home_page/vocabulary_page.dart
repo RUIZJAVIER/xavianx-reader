@@ -30,7 +30,7 @@ class _VocabularyPageState extends State<VocabularyPage> {
     if (!mounted) return;
     setState(() {
       _decks = decks;
-      _due = decks.fold(0, (sum, deck) => sum + deck.due);
+      _due = decks.fold(0, (sum, deck) => sum + deck.newCards + deck.due);
     });
   }
 
@@ -76,6 +76,32 @@ class _VocabularyPageState extends State<VocabularyPage> {
     }
   }
 
+  /// Blue "new" / green "due today" numeric badge.
+  Widget _counter(Color color, int count, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            '$count',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(color: color, fontSize: 12)),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = L10n.of(context);
@@ -92,44 +118,68 @@ class _VocabularyPageState extends State<VocabularyPage> {
           ),
         ],
       ),
-      body: decks == null
-          ? const Center(child: CircularProgressIndicator())
-          : decks.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text(
-                      l10n.vocabularyCardsEmpty,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Theme.of(context).hintColor),
-                    ),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: decks == null
+            ? ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: const [
+                  SizedBox(
+                    height: 240,
+                    child: Center(child: CircularProgressIndicator()),
                   ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: decks.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final deck = decks[index];
-                    final due = deck.due == 0
-                        ? ''
-                        : ' · ${deck.due} ${l10n.vocabularyReviewPending}';
-                    return Card(
-                      margin: EdgeInsets.zero,
-                      child: ListTile(
-                        leading: const Icon(Icons.folder_outlined),
-                        title: Text(
-                          deck.island,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                ],
+              )
+            : decks.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Text(
+                          l10n.vocabularyCardsEmpty,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Theme.of(context).hintColor),
                         ),
-                        subtitle: Text(
-                            '${deck.total} ${l10n.vocabularyDeckCards}$due'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => _openDeck(deck),
                       ),
-                    );
-                  },
-                ),
+                    ],
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    itemCount: decks.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final deck = decks[index];
+                      return Card(
+                        margin: EdgeInsets.zero,
+                        child: ListTile(
+                          leading: const Icon(Icons.folder_outlined),
+                          title: Text(
+                            deck.island,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Wrap(
+                              spacing: 16,
+                              runSpacing: 4,
+                              children: [
+                                _counter(Colors.blue, deck.newCards,
+                                    l10n.vocabularyDeckNew),
+                                _counter(Colors.green, deck.due,
+                                    l10n.vocabularyDeckDue),
+                              ],
+                            ),
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _openDeck(deck),
+                        ),
+                      );
+                    },
+                  ),
+      ),
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.all(16),
         child: Column(

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/dao/vocabulary.dart';
 import 'package:anx_reader/models/vocabulary.dart';
@@ -13,7 +11,8 @@ import 'package:langchain_core/chat_models.dart';
 const String fallbackLanguageIsland = generalLanguageIsland;
 
 /// Asks the configured LLM for a short "language island" (the thematic
-/// scenario where the word lives). Falls back to [fallbackLanguageIsland].
+/// scenario where the word lives). Falls back to [fallbackLanguageIsland] when
+/// there is no provider or the answer is blank; rethrows provider failures.
 Future<String> inferLanguageIsland({
   required String word,
   required String definition,
@@ -43,7 +42,7 @@ Name the "language island": a short thematic scenario where this word would be u
     return island;
   } catch (e) {
     AnxLog.warning('Vocabulary: island inference failed: $e');
-    return fallbackLanguageIsland;
+    rethrow;
   }
 }
 
@@ -66,10 +65,16 @@ Future<int> saveVocabulary({
 }) async {
   final trimmedIsland = languageIsland?.trim() ?? '';
   final mnemonic = associationMnemonic?.trim();
-  final island =
-      trimmedIsland.isEmpty ? fallbackLanguageIsland : trimmedIsland;
+  // A blank island waits for the LLM so the caller can show its progress.
+  final island = trimmedIsland.isEmpty
+      ? await inferLanguageIsland(
+          word: word,
+          definition: definition,
+          contextSentence: contextSentence,
+        ).timeout(const Duration(seconds: 15))
+      : trimmedIsland;
 
-  final id = await vocabularyDao.save(
+  return vocabularyDao.save(
     Vocabulary(
       id: -1,
       word: word.trim(),
@@ -82,31 +87,6 @@ Future<int> saveVocabulary({
       nextReviewDate: DateTime.now().millisecondsSinceEpoch,
     ),
   );
-
-  // The card is already saved; a slow or dead AI provider must not hide it, so
-  // the island is refined in the background and General is the safe default.
-  if (trimmedIsland.isEmpty) {
-    unawaited(_refineIsland(id, word, definition, contextSentence));
-  }
-  return id;
-}
-
-Future<void> _refineIsland(
-  int id,
-  String word,
-  String definition,
-  String? contextSentence,
-) async {
-  try {
-    final island = await inferLanguageIsland(
-      word: word,
-      definition: definition,
-      contextSentence: contextSentence,
-    );
-    await vocabularyDao.updateFields(id, languageIsland: island);
-  } catch (e) {
-    AnxLog.warning('Vocabulary: island refinement failed: $e');
-  }
 }
 
 typedef Sm2Update = ({

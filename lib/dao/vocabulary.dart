@@ -25,13 +25,18 @@ class VocabularyDao extends BaseDao {
     );
   }
 
-  /// One row per deck, with its card and due counts.
+  /// One row per deck, with its new and due counts.
   Future<List<VocabularyDeck>> fetchDecks({DateTime? now}) {
+    final dueBefore = (now ?? DateTime.now()).millisecondsSinceEpoch;
     return rawQueryList(
-      'SELECT $_islandExpr AS island, COUNT(*) AS total, '
-      'SUM(CASE WHEN next_review_date <= ? THEN 1 ELSE 0 END) AS due '
+      // repetition 0 = never answered (Anki "new"); the rest are due reviews.
+      'SELECT $_islandExpr AS island, '
+      'SUM(CASE WHEN repetition = 0 AND next_review_date <= ? THEN 1 ELSE 0 END) '
+      'AS new_cards, '
+      'SUM(CASE WHEN repetition > 0 AND next_review_date <= ? THEN 1 ELSE 0 END) '
+      'AS due '
       'FROM $table GROUP BY island ORDER BY island COLLATE NOCASE',
-      arguments: [(now ?? DateTime.now()).millisecondsSinceEpoch],
+      arguments: [dueBefore, dueBefore],
       mapper: VocabularyDeck.fromDb,
     );
   }

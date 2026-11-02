@@ -4,18 +4,18 @@ const String generalLanguageIsland = 'General';
 class VocabularyDeck {
   const VocabularyDeck({
     required this.island,
-    required this.total,
+    required this.newCards,
     required this.due,
   });
 
   final String island;
-  final int total;
+  final int newCards;
   final int due;
 
   factory VocabularyDeck.fromDb(Map<String, dynamic> row) {
     return VocabularyDeck(
       island: row['island'] as String? ?? generalLanguageIsland,
-      total: (row['total'] as num?)?.toInt() ?? 0,
+      newCards: (row['new_cards'] as num?)?.toInt() ?? 0,
       due: (row['due'] as num?)?.toInt() ?? 0,
     );
   }

@@ -134,55 +134,84 @@ class _TranslationMenuState extends State<TranslationMenu> {
     if (definition.isEmpty) return;
 
     final islandController = TextEditingController();
-    final island = await showDialog<String>(
+    var saving = false;
+    await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(L10n.of(dialogContext).vocabularySave),
-        content: TextField(
-          controller: islandController,
-          autofocus: true,
-          decoration: InputDecoration(
-            labelText: L10n.of(dialogContext).vocabularyIslandLabel,
-            hintText: L10n.of(dialogContext).vocabularyIslandHint,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(L10n.of(dialogContext).commonCancel),
-          ),
-          TextButton(
-            onPressed: () =>
-                Navigator.pop(dialogContext, islandController.text),
-            child: Text(L10n.of(dialogContext).commonSave),
-          ),
-        ],
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final waitingForIsland =
+              saving && islandController.text.trim().isEmpty;
+
+          Future<void> submit() async {
+            if (saving) return;
+            setDialogState(() => saving = true);
+            try {
+              await saveVocabulary(
+                word: widget.content,
+                definition: definition,
+                contextSentence: widget.contextText,
+                languageIsland: islandController.text,
+              );
+              if (!dialogContext.mounted) return;
+              Navigator.pop(dialogContext, true);
+              // The context menu lives in an OverlayEntry that may be gone once
+              // the dialog closes, so the feedback is shown from the root
+              // messenger.
+              final rootContext = navigatorKey.currentContext;
+              if (rootContext != null) {
+                ScaffoldMessenger.of(rootContext).showSnackBar(
+                  SnackBar(
+                    backgroundColor: Colors.green,
+                    content: Text(L10n.of(rootContext).vocabularySaved),
+                  ),
+                );
+              } else if (mounted) {
+                AnxToast.show(L10n.of(context).vocabularySaved);
+              }
+            } catch (e) {
+              if (!dialogContext.mounted) return;
+              setDialogState(() => saving = false);
+              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                SnackBar(
+                  backgroundColor: Colors.red,
+                  content: Text('${L10n.of(dialogContext).commonFailed}: $e'),
+                ),
+              );
+            }
+          }
+
+          return AlertDialog(
+            title: Text(L10n.of(dialogContext).vocabularySave),
+            content: TextField(
+              controller: islandController,
+              autofocus: true,
+              enabled: !saving,
+              decoration: InputDecoration(
+                labelText: L10n.of(dialogContext).vocabularyIslandLabel,
+                hintText: L10n.of(dialogContext).vocabularyIslandHint,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.pop(dialogContext),
+                child: Text(L10n.of(dialogContext).commonCancel),
+              ),
+              TextButton(
+                onPressed: saving ? null : submit,
+                child: waitingForIsland
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(L10n.of(dialogContext).commonSave),
+              ),
+            ],
+          );
+        },
       ),
     );
     islandController.dispose();
-    if (island == null || !mounted) return;
-
-    try {
-      await saveVocabulary(
-        word: widget.content,
-        definition: definition,
-        contextSentence: widget.contextText,
-        languageIsland: island,
-      );
-      // The context menu lives in an OverlayEntry that may be gone once the
-      // dialog closes, so the feedback is shown from the root messenger.
-      final rootContext = navigatorKey.currentContext;
-      if (rootContext != null) {
-        ScaffoldMessenger.of(rootContext).showSnackBar(
-          SnackBar(content: Text(L10n.of(rootContext).vocabularySaved)),
-        );
-      } else if (mounted) {
-        AnxToast.show(L10n.of(context).vocabularySaved);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      AnxToast.show('${L10n.of(context).commonFailed}: $e');
-    }
   }
 
   Widget _langPicker(bool isFrom) {

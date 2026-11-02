@@ -978,6 +978,8 @@
   "vocabularyReview": "Review",
   "vocabularyReviewPending": "due",
   "vocabularyDeckCards": "cards",
+  "vocabularyDeckNew": "New",
+  "vocabularyDeckDue": "Due today",
   "vocabularyReviewEmpty": "No cards due right now.",
   "vocabularyReviewDone": "Review complete",
   "vocabularyShowAnswer": "Show answer",

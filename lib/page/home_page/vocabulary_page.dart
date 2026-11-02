@@ -1,11 +1,11 @@
 import 'package:anx_reader/dao/vocabulary.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/models/vocabulary.dart';
+import 'package:anx_reader/page/home_page/vocabulary_deck_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_edit_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_review_page.dart';
 import 'package:anx_reader/service/vocabulary/vocabulary_service.dart';
 import 'package:anx_reader/utils/toast/common.dart';
-import 'package:anx_reader/widgets/vocabulary/vocabulary_rich_text.dart';
 import 'package:flutter/material.dart';
 
 class VocabularyPage extends StatefulWidget {
@@ -16,7 +16,7 @@ class VocabularyPage extends StatefulWidget {
 }
 
 class _VocabularyPageState extends State<VocabularyPage> {
-  List<Vocabulary>? _items;
+  List<VocabularyDeck>? _decks;
   int _due = 0;
 
   @override
@@ -26,20 +26,29 @@ class _VocabularyPageState extends State<VocabularyPage> {
   }
 
   Future<void> _load() async {
-    final items = await vocabularyDao.fetchAll();
-    final due = await vocabularyDao.countDue();
+    final decks = await vocabularyDao.fetchDecks();
     if (!mounted) return;
     setState(() {
-      _items = items;
-      _due = due;
+      _decks = decks;
+      _due = decks.fold(0, (sum, deck) => sum + deck.due);
     });
   }
 
-  Future<void> _openEditor([Vocabulary? card]) async {
+  Future<void> _openEditor() async {
     final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => VocabularyEditPage(card: card)),
+      MaterialPageRoute(builder: (_) => const VocabularyEditPage()),
     );
     if (changed == true) _load();
+  }
+
+  Future<void> _openDeck(VocabularyDeck deck) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => VocabularyDeckPage(island: deck.island),
+      ),
+    );
+    // Cards may have been reviewed or edited (or moved to another deck).
+    if (mounted) _load();
   }
 
   Future<void> _openReview() async {
@@ -52,7 +61,7 @@ class _VocabularyPageState extends State<VocabularyPage> {
 
   Future<void> _export() async {
     final l10n = L10n.of(context);
-    final items = _items ?? const <Vocabulary>[];
+    final items = await vocabularyDao.fetchAll();
     if (items.isEmpty) {
       AnxToast.show(l10n.vocabularyExportEmpty);
       return;
@@ -67,24 +76,10 @@ class _VocabularyPageState extends State<VocabularyPage> {
     }
   }
 
-  Widget _line(IconData icon, Widget child) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 16, color: Theme.of(context).hintColor),
-          const SizedBox(width: 6),
-          Expanded(child: child),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = L10n.of(context);
-    final items = _items;
+    final decks = _decks;
 
     return Scaffold(
       appBar: AppBar(
@@ -93,13 +88,13 @@ class _VocabularyPageState extends State<VocabularyPage> {
           IconButton(
             tooltip: l10n.vocabularyNewCard,
             icon: const Icon(Icons.add),
-            onPressed: () => _openEditor(),
+            onPressed: _openEditor,
           ),
         ],
       ),
-      body: items == null
+      body: decks == null
           ? const Center(child: CircularProgressIndicator())
-          : items.isEmpty
+          : decks.isEmpty
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32),
@@ -112,44 +107,25 @@ class _VocabularyPageState extends State<VocabularyPage> {
                 )
               : ListView.separated(
                   padding: const EdgeInsets.all(16),
-                  itemCount: items.length,
+                  itemCount: decks.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
-                    final item = items[index];
+                    final deck = decks[index];
+                    final due = deck.due == 0
+                        ? ''
+                        : ' · ${deck.due} ${l10n.vocabularyReviewPending}';
                     return Card(
                       margin: EdgeInsets.zero,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () => _openEditor(item),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                item.word,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.bold),
-                              ),
-                              if (item.definition.isNotEmpty)
-                                _line(Icons.translate,
-                                    VocabularyRichText(item.definition)),
-                              if (item.languageIsland?.isNotEmpty ?? false)
-                                _line(Icons.map_outlined,
-                                    Text(item.languageIsland!)),
-                              if (item.associationMnemonic?.isNotEmpty ?? false)
-                                _line(
-                                    Icons.psychology_outlined,
-                                    VocabularyRichText(
-                                        item.associationMnemonic!)),
-                              if (item.contextSentence.isNotEmpty)
-                                _line(Icons.format_quote,
-                                    Text(item.contextSentence)),
-                            ],
-                          ),
+                      child: ListTile(
+                        leading: const Icon(Icons.folder_outlined),
+                        title: Text(
+                          deck.island,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
+                        subtitle: Text(
+                            '${deck.total} ${l10n.vocabularyDeckCards}$due'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => _openDeck(deck),
                       ),
                     );
                   },

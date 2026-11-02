@@ -7,7 +7,10 @@ import 'package:anx_reader/widgets/vocabulary/vocabulary_rich_text.dart';
 import 'package:flutter/material.dart';
 
 class VocabularyReviewPage extends StatefulWidget {
-  const VocabularyReviewPage({super.key});
+  const VocabularyReviewPage({super.key, this.island});
+
+  /// When set, only the cards of that deck are reviewed.
+  final String? island;
 
   @override
   State<VocabularyReviewPage> createState() => _VocabularyReviewPageState();
@@ -26,7 +29,7 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
   }
 
   Future<void> _load() async {
-    final cards = await vocabularyDao.fetchDue();
+    final cards = await vocabularyDao.fetchDue(island: widget.island);
     if (!mounted) return;
     setState(() => _cards = cards);
   }
@@ -182,7 +185,7 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(l10n.vocabularyReview),
+        title: Text(widget.island ?? l10n.vocabularyReview),
         actions: [
           if (cards != null && cards.isNotEmpty && _index < cards.length)
             Center(

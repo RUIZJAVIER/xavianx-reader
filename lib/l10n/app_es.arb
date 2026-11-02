@@ -915,6 +915,7 @@
   "vocabularyExportToAnki": "Exportar a CSV (Anki)",
   "vocabularyReview": "Repasar",
   "vocabularyReviewPending": "pendientes",
+  "vocabularyDeckCards": "tarjetas",
   "vocabularyReviewEmpty": "No hay tarjetas pendientes.",
   "vocabularyReviewDone": "Repaso completado",
   "vocabularyShowAnswer": "Mostrar respuesta",

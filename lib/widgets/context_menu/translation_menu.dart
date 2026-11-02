@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/enums/lang_list.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
+import 'package:anx_reader/main.dart';
 import 'package:anx_reader/service/translate/index.dart';
 import 'package:anx_reader/service/vocabulary/vocabulary_service.dart';
 import 'package:anx_reader/utils/toast/common.dart';
@@ -168,13 +169,14 @@ class _TranslationMenuState extends State<TranslationMenu> {
         contextSentence: widget.contextText,
         languageIsland: island,
       );
-      if (!mounted) return;
-      final messenger = ScaffoldMessenger.maybeOf(context);
-      if (messenger != null) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(L10n.of(context).vocabularySaved)),
+      // The context menu lives in an OverlayEntry that may be gone once the
+      // dialog closes, so the feedback is shown from the root messenger.
+      final rootContext = navigatorKey.currentContext;
+      if (rootContext != null) {
+        ScaffoldMessenger.of(rootContext).showSnackBar(
+          SnackBar(content: Text(L10n.of(rootContext).vocabularySaved)),
         );
-      } else {
+      } else if (mounted) {
         AnxToast.show(L10n.of(context).vocabularySaved);
       }
     } catch (e) {

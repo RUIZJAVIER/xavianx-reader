@@ -977,6 +977,7 @@
   "vocabularyExportToAnki": "Export to CSV (Anki)",
   "vocabularyReview": "Review",
   "vocabularyReviewPending": "due",
+  "vocabularyDeckCards": "cards",
   "vocabularyReviewEmpty": "No cards due right now.",
   "vocabularyReviewDone": "Review complete",
   "vocabularyShowAnswer": "Show answer",

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/dao/vocabulary.dart';
 import 'package:anx_reader/models/vocabulary.dart';
@@ -8,7 +10,7 @@ import 'package:anx_reader/utils/save_file_to_download.dart';
 import 'package:csv/csv.dart';
 import 'package:langchain_core/chat_models.dart';
 
-const String fallbackLanguageIsland = 'General';
+const String fallbackLanguageIsland = generalLanguageIsland;
 
 /// Asks the configured LLM for a short "language island" (the thematic
 /// scenario where the word lives). Falls back to [fallbackLanguageIsland].
@@ -63,16 +65,11 @@ Future<int> saveVocabulary({
   String? associationMnemonic,
 }) async {
   final trimmedIsland = languageIsland?.trim() ?? '';
-  final island = trimmedIsland.isNotEmpty
-      ? trimmedIsland
-      : await inferLanguageIsland(
-          word: word,
-          definition: definition,
-          contextSentence: contextSentence,
-        );
   final mnemonic = associationMnemonic?.trim();
+  final island =
+      trimmedIsland.isEmpty ? fallbackLanguageIsland : trimmedIsland;
 
-  return vocabularyDao.save(
+  final id = await vocabularyDao.save(
     Vocabulary(
       id: -1,
       word: word.trim(),
@@ -85,6 +82,31 @@ Future<int> saveVocabulary({
       nextReviewDate: DateTime.now().millisecondsSinceEpoch,
     ),
   );
+
+  // The card is already saved; a slow or dead AI provider must not hide it, so
+  // the island is refined in the background and General is the safe default.
+  if (trimmedIsland.isEmpty) {
+    unawaited(_refineIsland(id, word, definition, contextSentence));
+  }
+  return id;
+}
+
+Future<void> _refineIsland(
+  int id,
+  String word,
+  String definition,
+  String? contextSentence,
+) async {
+  try {
+    final island = await inferLanguageIsland(
+      word: word,
+      definition: definition,
+      contextSentence: contextSentence,
+    );
+    await vocabularyDao.updateFields(id, languageIsland: island);
+  } catch (e) {
+    AnxLog.warning('Vocabulary: island refinement failed: $e');
+  }
 }
 
 typedef Sm2Update = ({

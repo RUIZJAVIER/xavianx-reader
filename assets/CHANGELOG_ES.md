@@ -1,5 +1,7 @@
 ## 1.15.0
 - Versión actual: Integración de IA, repetición espaciada nativa, auto-clasificación y flashcards enriquecidas
+- Feat(vocabulary): mazos agrupados por isla lingüística, con repaso global o de un solo mazo
+- Fix(vocabulary): las palabras se guardan al instante (sin esperar a la IA) y el aviso de guardado se muestra siempre
 - Feat(vocabulary): repetición espaciada SM-2 con botones Olvidé, Difícil, Bien y Fácil
 - Feat(vocabulary): edición de tarjetas con negritas, cursivas y colores compatibles con Anki
 - Feat(ai): herramientas de IA para organizar la biblioteca y etiquetar libros automáticamente

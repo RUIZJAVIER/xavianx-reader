@@ -4,23 +4,35 @@ import 'package:anx_reader/models/vocabulary.dart';
 class VocabularyDao extends BaseDao {
   static const String table = 'vocabulary';
 
+  // Cards without an island (or with a blank one) live in the General deck.
+  static const String _islandExpr =
+      "COALESCE(NULLIF(TRIM(language_island), ''), '$generalLanguageIsland')";
+
   Future<int> save(Vocabulary vocabulary) {
     return insert(table, vocabulary.toMap());
   }
 
   Future<List<Vocabulary>> fetchAll({String? island, int? limit}) {
     final trimmedIsland = island?.trim();
+    final scoped = trimmedIsland != null && trimmedIsland.isNotEmpty;
     return queryList(
       table,
       mapper: Vocabulary.fromDb,
-      where: trimmedIsland == null || trimmedIsland.isEmpty
-          ? null
-          : 'language_island = ?',
-      whereArgs: trimmedIsland == null || trimmedIsland.isEmpty
-          ? null
-          : [trimmedIsland],
+      where: scoped ? '$_islandExpr = ?' : null,
+      whereArgs: scoped ? [trimmedIsland] : null,
       orderBy: 'timestamp DESC',
       limit: limit,
+    );
+  }
+
+  /// One row per deck, with its card and due counts.
+  Future<List<VocabularyDeck>> fetchDecks({DateTime? now}) {
+    return rawQueryList(
+      'SELECT $_islandExpr AS island, COUNT(*) AS total, '
+      'SUM(CASE WHEN next_review_date <= ? THEN 1 ELSE 0 END) AS due '
+      'FROM $table GROUP BY island ORDER BY island COLLATE NOCASE',
+      arguments: [(now ?? DateTime.now()).millisecondsSinceEpoch],
+      mapper: VocabularyDeck.fromDb,
     );
   }
 
@@ -33,20 +45,33 @@ class VocabularyDao extends BaseDao {
     );
   }
 
-  Future<List<Vocabulary>> fetchDue({DateTime? now}) {
+  Future<List<Vocabulary>> fetchDue({DateTime? now, String? island}) {
+    final trimmedIsland = island?.trim();
+    final scoped = trimmedIsland != null && trimmedIsland.isNotEmpty;
     return queryList(
       table,
       mapper: Vocabulary.fromDb,
-      where: 'next_review_date <= ?',
-      whereArgs: [(now ?? DateTime.now()).millisecondsSinceEpoch],
+      where: scoped
+          ? 'next_review_date <= ? AND $_islandExpr = ?'
+          : 'next_review_date <= ?',
+      whereArgs: [
+        (now ?? DateTime.now()).millisecondsSinceEpoch,
+        if (scoped) trimmedIsland,
+      ],
       orderBy: 'next_review_date ASC',
     );
   }
 
-  Future<int> countDue({DateTime? now}) async {
+  Future<int> countDue({DateTime? now, String? island}) async {
+    final trimmedIsland = island?.trim();
+    final scoped = trimmedIsland != null && trimmedIsland.isNotEmpty;
     final count = await rawQuerySingle(
-      'SELECT COUNT(*) AS total FROM $table WHERE next_review_date <= ?',
-      arguments: [(now ?? DateTime.now()).millisecondsSinceEpoch],
+      'SELECT COUNT(*) AS total FROM $table WHERE next_review_date <= ?'
+      '${scoped ? ' AND $_islandExpr = ?' : ''}',
+      arguments: [
+        (now ?? DateTime.now()).millisecondsSinceEpoch,
+        if (scoped) trimmedIsland,
+      ],
       mapper: (row) => row['total'] as int,
     );
     return count ?? 0;

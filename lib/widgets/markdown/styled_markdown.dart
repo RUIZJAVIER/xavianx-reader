@@ -18,13 +18,38 @@ class StyledMarkdown extends StatelessWidget {
     this.fontSize,
   });
 
+  static final RegExp _thinkBlockRegex =
+      RegExp(r'<think-block>.*?</think-block>', dotAll: true);
+  static final RegExp _toolStepRegex =
+      RegExp(r'<tool-step>.*?</tool-step>', dotAll: true);
+  static final RegExp _thinkRegex =
+      RegExp(r'<think>.*?</think>', dotAll: true);
+  static final RegExp _trailingThinkBlock =
+      RegExp(r'<think-block>.*$', dotAll: true);
+  static final RegExp _trailingToolStep =
+      RegExp(r'<tool-step>.*$', dotAll: true);
+  static final RegExp _trailingThink =
+      RegExp(r'<think>.*$', dotAll: true);
+
+  static String stripLlmArtifacts(String input) {
+    return input
+        .replaceAll(_thinkBlockRegex, '')
+        .replaceAll(_toolStepRegex, '')
+        .replaceAll(_thinkRegex, '')
+        .replaceAll(_trailingThinkBlock, '')
+        .replaceAll(_trailingToolStep, '')
+        .replaceAll(_trailingThink, '')
+        .trim();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final baseFontSize = fontSize;
+    final cleanedData = stripLlmArtifacts(data);
     return SelectableRegion(
       selectionControls: selectionControls(),
-      child: GptMarkdown(data,
+      child: GptMarkdown(cleanedData,
           followLinkColor: true,
           style:
               baseFontSize != null ? TextStyle(fontSize: baseFontSize) : null,

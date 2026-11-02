@@ -54,4 +54,12 @@ class SystemTtsProvider extends TtsServiceProvider {
   @override
   String getLabel(BuildContext context) =>
       L10n.of(context).settingsNarrateSystemTts;
+
+  @override
+  String resolveVoice(String? voiceOverride) {
+    if (voiceOverride != null && voiceOverride.isNotEmpty) {
+      return voiceOverride;
+    }
+    return getSelectedVoice();
+  }
 }

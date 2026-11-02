@@ -24,6 +24,7 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
   final _mnemonicFocus = FocusNode();
   bool _saving = false;
   bool _generatingMnemonic = false;
+  bool _inferringIsland = false;
 
   @override
   void initState() {
@@ -127,13 +128,25 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
     try {
       final card = widget.card;
       if (card == null) {
-        await saveVocabulary(
+        final result = await saveVocabulary(
           word: word,
           definition: definition,
           contextSentence: _context.text,
           languageIsland: _island.text,
           associationMnemonic: mnemonic,
         );
+        if (!mounted) return;
+        final message = result.fallbackUsed
+            ? 'Palabra guardada en "General" (IA no disponible)'
+            : l10n.vocabularySaved;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: result.fallbackUsed ? Colors.orange : Colors.green,
+            content: Text(message),
+          ),
+        );
+        Navigator.pop(context, true);
+        return;
       } else {
         await vocabularyDao.updateCard(card.copyWith(
           word: word,
@@ -193,6 +206,37 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
       );
     } finally {
       if (mounted) setState(() => _generatingMnemonic = false);
+    }
+  }
+
+  Future<void> _inferIsland() async {
+    final word = _word.text.trim();
+    if (word.isEmpty) {
+      AnxToast.show(L10n.of(context).vocabularyFieldRequired);
+      return;
+    }
+    setState(() => _inferringIsland = true);
+    try {
+      final island = await inferLanguageIsland(
+        word: word,
+        definition: _definition.text.trim(),
+        contextSentence: _context.text.trim(),
+      ).timeout(const Duration(seconds: 12));
+      if (!mounted) return;
+      setState(() {
+        _island.text = island;
+      });
+      AnxToast.show('Isla asignada: $island ✨');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.red,
+          content: Text('${L10n.of(context).commonFailed}: $e'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _inferringIsland = false);
     }
   }
 
@@ -264,6 +308,20 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
               labelText: l10n.vocabularyIslandLabel,
               hintText: l10n.vocabularyIslandHint,
               border: const OutlineInputBorder(),
+              suffixIcon: _inferringIsland
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : IconButton(
+                      tooltip: 'Clasificar isla con IA ✨',
+                      icon: const Icon(Icons.auto_awesome),
+                      onPressed: _inferIsland,
+                    ),
             ),
           ),
           const SizedBox(height: 12),

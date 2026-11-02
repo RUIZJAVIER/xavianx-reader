@@ -146,7 +146,7 @@ class _TranslationMenuState extends State<TranslationMenu> {
             if (saving) return;
             setDialogState(() => saving = true);
             try {
-              await saveVocabulary(
+              final result = await saveVocabulary(
                 word: widget.content,
                 definition: definition,
                 contextSentence: widget.contextText,
@@ -158,15 +158,22 @@ class _TranslationMenuState extends State<TranslationMenu> {
               // the dialog closes, so the feedback is shown from the root
               // messenger.
               final rootContext = navigatorKey.currentContext;
+              final msg = result.fallbackUsed
+                  ? 'Palabra guardada en "General" (IA no disponible)'
+                  : (rootContext != null
+                      ? L10n.of(rootContext).vocabularySaved
+                      : L10n.of(context).vocabularySaved);
+              final bgColor =
+                  result.fallbackUsed ? Colors.orange : Colors.green;
               if (rootContext != null) {
                 ScaffoldMessenger.of(rootContext).showSnackBar(
                   SnackBar(
-                    backgroundColor: Colors.green,
-                    content: Text(L10n.of(rootContext).vocabularySaved),
+                    backgroundColor: bgColor,
+                    content: Text(msg),
                   ),
                 );
               } else if (mounted) {
-                AnxToast.show(L10n.of(context).vocabularySaved);
+                AnxToast.show(msg);
               }
             } catch (e) {
               if (!dialogContext.mounted) return;

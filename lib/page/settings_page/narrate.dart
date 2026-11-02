@@ -368,71 +368,101 @@ class _NarrateSettingsState extends ConsumerState<NarrateSettings>
         ),
 
         // Voice List Section - Inlined
-        SettingsSection(
-          title: Text(L10n.of(context).settingsNarrateTtsVoiceModels),
-          tiles: [
-            CustomSettingsTile(
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: _showVoiceList
-                    ? Column(
-                        children: [..._buildVoiceListContent()],
-                      )
-                    : Center(
-                        child: AnxButton(
-                          onPressed: () async {
-                            setState(() {
-                              _showVoiceList = true;
-                            });
-                            try {
-                              final voices =
-                                  await ref.refresh(ttsVoicesProvider.future);
-                              if (!mounted) return;
-                              if (selectedVoiceModel == null &&
-                                  voices.isNotEmpty) {
-                                final currentLocale =
-                                    Localizations.localeOf(context);
-                                final currentLangCode =
-                                    currentLocale.languageCode;
-
-                                // Try to find a voice matching current language
-                                TtsVoice? match = voices.firstWhere(
-                                  (v) => v.locale
-                                      .toLowerCase()
-                                      .startsWith(currentLangCode.toLowerCase()),
-                                  orElse: () => voices.firstWhere(
-                                    // Fallback to English
-                                    (v) =>
-                                        v.locale.toLowerCase().startsWith('en'),
-                                    // Fallback to first available
-                                    orElse: () => voices.first,
-                                  ),
-                                );
-
-                                _selectVoiceModel(match.shortName);
-                              }
-                            } catch (e) {
-                              AnxLog.severe('TTS voices error: $e');
-                              if (!mounted) return;
-                              setState(() {
-                                _showVoiceList = false;
-                              });
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                      'Error al conectar con el motor de voz'),
-                                ),
-                              );
-                            }
-                          },
-                          child: Text(
-                              L10n.of(context).settingsNarrateGetVoiceList),
+        if (ttsServiceId == 'system')
+          SettingsSection(
+            title: Text(L10n.of(context).settingsNarrateTtsVoiceModels),
+            tiles: [
+              CustomSettingsTile(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16.0, vertical: 12.0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline,
+                          color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'El TTS del Sistema respeta la voz y el idioma configurados en los ajustes del dispositivo.',
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
                         ),
                       ),
+                    ],
+                  ),
+                ),
               ),
-            )
-          ],
-        )
+            ],
+          )
+        else
+          SettingsSection(
+            title: Text(L10n.of(context).settingsNarrateTtsVoiceModels),
+            tiles: [
+              CustomSettingsTile(
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: _showVoiceList
+                      ? Column(
+                          children: [..._buildVoiceListContent()],
+                        )
+                      : Center(
+                          child: AnxButton(
+                            onPressed: () async {
+                              setState(() {
+                                _showVoiceList = true;
+                              });
+                              try {
+                                final voices =
+                                    await ref.refresh(ttsVoicesProvider.future);
+                                if (!mounted) return;
+                                if (selectedVoiceModel == null &&
+                                    voices.isNotEmpty) {
+                                  final currentLocale =
+                                      Localizations.localeOf(context);
+                                  final currentLangCode =
+                                      currentLocale.languageCode;
+
+                                  // Try to find a voice matching current language
+                                  TtsVoice? match = voices.firstWhere(
+                                    (v) => v.locale
+                                        .toLowerCase()
+                                        .startsWith(currentLangCode.toLowerCase()),
+                                    orElse: () => voices.firstWhere(
+                                      // Fallback to English
+                                      (v) =>
+                                          v.locale.toLowerCase().startsWith('en'),
+                                      // Fallback to first available
+                                      orElse: () => voices.first,
+                                    ),
+                                  );
+
+                                  _selectVoiceModel(match.shortName);
+                                }
+                              } catch (e) {
+                                AnxLog.severe('TTS voices error: $e');
+                                if (!mounted) return;
+                                setState(() {
+                                  _showVoiceList = false;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                        'Error al conectar con el motor de voz'),
+                                  ),
+                                );
+                              }
+                            },
+                            child: Text(
+                                L10n.of(context).settingsNarrateGetVoiceList),
+                          ),
+                        ),
+                ),
+              )
+            ],
+          )
       ],
     );
   }

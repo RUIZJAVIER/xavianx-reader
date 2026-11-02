@@ -28,12 +28,20 @@ class _VocabularyPageState extends State<VocabularyPage> {
   }
 
   Future<void> _load() async {
-    final decks = await vocabularyDao.fetchDecks();
-    if (!mounted) return;
-    setState(() {
-      _decks = decks;
-      _due = decks.fold(0, (sum, deck) => sum + deck.newCards + deck.due);
-    });
+    try {
+      final decks = await vocabularyDao.fetchDecks();
+      if (!mounted) return;
+      setState(() {
+        _decks = decks;
+        _due = decks.fold(0, (sum, deck) => sum + deck.newCards + deck.due);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _decks = const [];
+        _due = 0;
+      });
+    }
   }
 
   Future<void> _openEditor() async {
@@ -155,11 +163,26 @@ class _VocabularyPageState extends State<VocabularyPage> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
                       Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Text(
-                          l10n.vocabularyCardsEmpty,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Theme.of(context).hintColor),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 32, vertical: 64),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.style_outlined,
+                              size: 48,
+                              color: Theme.of(context).hintColor,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              l10n.vocabularyCardsEmpty.isNotEmpty
+                                  ? l10n.vocabularyCardsEmpty
+                                  : 'Aún no hay palabras guardadas',
+                              textAlign: TextAlign.center,
+                              style:
+                                  TextStyle(color: Theme.of(context).hintColor),
+                            ),
+                          ],
                         ),
                       ),
                     ],

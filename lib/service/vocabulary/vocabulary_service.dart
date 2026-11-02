@@ -82,7 +82,9 @@ Instrucciones:
   return answer.trim();
 }
 
-Future<int> saveVocabulary({
+typedef SaveVocabularyResult = ({int id, bool fallbackUsed});
+
+Future<SaveVocabularyResult> saveVocabulary({
   required String word,
   required String definition,
   String? contextSentence,
@@ -91,16 +93,26 @@ Future<int> saveVocabulary({
 }) async {
   final trimmedIsland = languageIsland?.trim() ?? '';
   final mnemonic = associationMnemonic?.trim();
-  // A blank island waits for the LLM so the caller can show its progress.
-  final island = trimmedIsland.isEmpty
-      ? await inferLanguageIsland(
-          word: word,
-          definition: definition,
-          contextSentence: contextSentence,
-        ).timeout(const Duration(seconds: 15))
-      : trimmedIsland;
+  String island = trimmedIsland;
+  bool fallbackUsed = false;
 
-  return vocabularyDao.save(
+  // A blank island waits for the LLM; on timeout/failure it falls back to 'General'.
+  if (island.isEmpty) {
+    try {
+      island = await inferLanguageIsland(
+        word: word,
+        definition: definition,
+        contextSentence: contextSentence,
+      ).timeout(const Duration(seconds: 10));
+    } catch (e) {
+      AnxLog.warning(
+          'Vocabulary: island inference failed, fallback to General: $e');
+      island = fallbackLanguageIsland;
+      fallbackUsed = true;
+    }
+  }
+
+  final id = await vocabularyDao.save(
     Vocabulary(
       id: -1,
       word: word.trim(),
@@ -113,6 +125,8 @@ Future<int> saveVocabulary({
       nextReviewDate: DateTime.now().millisecondsSinceEpoch,
     ),
   );
+
+  return (id: id, fallbackUsed: fallbackUsed);
 }
 
 typedef FsrsUpdate = ({

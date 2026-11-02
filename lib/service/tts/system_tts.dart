@@ -157,8 +157,11 @@ class SystemTts extends BaseTts {
     }
   }
 
-  /// Apply the voice by shortName
+  /// Apply the voice by shortName. If null or empty, respects OS default.
   Future<void> _applyVoice(String? voiceShortName) async {
+    if (voiceShortName == null || voiceShortName.isEmpty) {
+      return;
+    }
     try {
       // Get all voices to find the matching one
       final voices = await flutterTts.getVoices.timeout(_engineTimeout);
@@ -174,18 +177,9 @@ class SystemTts extends BaseTts {
             return;
           }
         }
-        // No hay voz guardada: se usa la mejor voz en español disponible.
-        final fallback = _pickSpanishVoice(voices);
-        if (fallback != null) {
-          await flutterTts.setVoice({
-            'name': fallback['name'],
-            'locale': fallback['locale'],
-          });
-        }
       }
     } catch (e) {
-      // Fallback: try to set voice directly (some platforms support this)
-      // Ignore errors if voice not found
+      // Ignore errors if voice not found or timeout
     }
   }
 
@@ -227,15 +221,17 @@ class SystemTts extends BaseTts {
     await flutterTts.setSpeechRate(rate);
     await flutterTts.setPitch(pitch);
 
-    // Apply the saved voice model
+    // Apply the saved voice model only if explicitly selected
     String? selectedVoice;
     try {
-      selectedVoice = SystemTtsProvider().resolveVoice(null);
+      selectedVoice = SystemTtsProvider().getSelectedVoice();
+      if (selectedVoice.isEmpty) selectedVoice = null;
     } catch (_) {
-      // Sin voz seleccionada se usa la voz por defecto del motor.
       selectedVoice = null;
     }
-    await _applyVoice(selectedVoice);
+    if (selectedVoice != null) {
+      await _applyVoice(selectedVoice);
+    }
 
     await flutterTts.speak(_currentVoiceText!);
 
@@ -321,29 +317,33 @@ class SystemTts extends BaseTts {
     if (isLinux) {
       return [];
     }
-    await _ensureAndroidEngine();
+    try {
+      await _ensureAndroidEngine();
 
-    dynamic voices = await flutterTts.getVoices.timeout(_engineTimeout);
+      dynamic voices = await flutterTts.getVoices.timeout(_engineTimeout);
 
-    // En Android el motor puede terminar de inicializar tarde: si la lista
-    // viene vacía se reintenta una vez.
-    if ((voices is! List || voices.isEmpty) && isAndroid) {
-      await Future.delayed(const Duration(milliseconds: 600));
-      await _ensureAndroidEngine(force: true);
-      voices = await flutterTts.getVoices.timeout(_engineTimeout);
-    }
+      // En Android el motor puede terminar de inicializar tarde: si la lista
+      // viene vacía se reintenta una vez.
+      if ((voices is! List || voices.isEmpty) && isAndroid) {
+        await Future.delayed(const Duration(milliseconds: 600));
+        await _ensureAndroidEngine(force: true);
+        voices = await flutterTts.getVoices.timeout(_engineTimeout);
+      }
 
-    if (voices is List) {
-      final list = voices.map((e) {
-        final map = Map<String, dynamic>.from(e);
-        return TtsVoice(
-            shortName: map['name'] ?? '',
-            name: map['name'] ?? '',
-            locale: map['locale']?.replaceAll('_', '-') ?? '',
-            gender: map['gender']?.toString().toLowerCase() ?? '',
-            rawData: map);
-      }).toList();
-      return _sortVoices(list);
+      if (voices is List) {
+        final list = voices.map((e) {
+          final map = Map<String, dynamic>.from(e);
+          return TtsVoice(
+              shortName: map['name'] ?? '',
+              name: map['name'] ?? '',
+              locale: map['locale']?.replaceAll('_', '-') ?? '',
+              gender: map['gender']?.toString().toLowerCase() ?? '',
+              rawData: map);
+        }).toList();
+        return _sortVoices(list);
+      }
+    } catch (e) {
+      AnxLog.warning('System TTS getVoices error: $e');
     }
     return [];
   }

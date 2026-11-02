@@ -63,8 +63,13 @@ abstract class RepositoryTool<I extends Object, O> {
 
   Future<String> _execute(I input) async {
     try {
-      AnxLog.info(
-          'AiTool: Executing tool $name with input: ${jsonEncode(input)}');
+      String inputLog;
+      try {
+        inputLog = jsonEncode(input);
+      } catch (_) {
+        inputLog = input.toString();
+      }
+      AnxLog.info('AiTool: Executing tool $name with input: $inputLog');
       final result = await _runWithTimeout(() => run(input));
       final serialized = serializeSuccess(result);
       final resultJson = jsonEncode(serialized);

@@ -79,7 +79,7 @@ ParsedReasoning parseReasoningContent(String content) {
   final timeline = <ParsedReasoningEntry>[];
   // Reasoning is intentionally discarded: the UI must show only the final
   // answer, never the model's (usually English) chain of thought.
-  final remaining = _stripReasoningTags(content);
+  final remaining = cleanDisplayContent(content);
   if (remaining.trim().isNotEmpty) {
     _parseTimeline(
       remaining,
@@ -91,9 +91,13 @@ ParsedReasoning parseReasoningContent(String content) {
   return ParsedReasoning(timeline: timeline);
 }
 
-/// Removes `<think>...</think>`, `<think-block>...</think-block>`, and `<tool-step>...</tool-step>` blocks.
+/// Removes `<think>...</think>`, `<think-block>...</think-block>`, `<tool-step>...</tool-step>`,
+/// and any remaining machine XML tags.
 String _stripReasoningTags(String content) {
-  var result = content.replaceAll(
+  var result = content;
+
+  // Bloques con contenido interior
+  result = result.replaceAll(
     RegExp(r'<think-block(?:\s[^>]*)?>[\s\S]*?<\/think-block\s*>',
         caseSensitive: false),
     '',
@@ -109,33 +113,25 @@ String _stripReasoningTags(String content) {
     '',
   );
   result = result.replaceAll(
-    RegExp(r'<think-block\b[^>]*/>', caseSensitive: false),
+    RegExp(r'<reply(?:\s[^>]*)?>[\s\S]*?<\/reply\s*>',
+        caseSensitive: false),
     '',
   );
+
+  // Etiquetas individuales o autocerradas
   result = result.replaceAll(
-    RegExp(r'<tool-step\b[^>]*/>', caseSensitive: false),
+    RegExp(r'<\/?(?:think-block|tool-step|reply|think|tool_call|function_call)\b[^>]*\/?>',
+        caseSensitive: false),
     '',
   );
+
+  // Remanentes o fragmentos no cerrados durante streaming
   result = result.replaceAll(
-    RegExp(r'<think\s*/>', caseSensitive: false),
+    RegExp(r'<(?:think-block|tool-step|reply|think|tool_call|function_call)\b.*$',
+        caseSensitive: false),
     '',
   );
-  result = result.replaceAll(
-    RegExp(r'<\/?think(?:\s[^>]*)?>', caseSensitive: false),
-    '',
-  );
-  result = result.replaceAll(
-    RegExp(r'<think-block\b.*$', caseSensitive: false),
-    '',
-  );
-  result = result.replaceAll(
-    RegExp(r'<tool-step\b.*$', caseSensitive: false),
-    '',
-  );
-  result = result.replaceAll(
-    RegExp(r'<think\b.*$', caseSensitive: false),
-    '',
-  );
+
   return result;
 }
 
@@ -174,10 +170,43 @@ String composeReasoningEnvelope({
 }
 
 String chatMessageDisplayContent(ChatMessage message) {
-  // Do not include `reasoningContent` in the displayed text. Some providers
-  // stream their chain of thought in English; the chat must only show the
-  // final answer.
-  return _stripReasoningTags(message.contentAsString).trim();
+  return cleanDisplayContent(message.contentAsString);
+}
+
+/// Decodifica bloques `<reply text_b64='...'>` y purga cualquier remanente de máquina.
+String cleanDisplayContent(String raw) {
+  if (raw.isEmpty) {
+    return '';
+  }
+
+  var content = raw;
+
+  // 1. Decodificar etiquetas <reply text_b64='(.*?)'.*?> si existen
+  final replyRegex = RegExp(
+    r"<reply\s+[^>]*?text_b64=['\'](.*?)['\'].*?>",
+    caseSensitive: false,
+    dotAll: true,
+  );
+
+  if (replyRegex.hasMatch(content)) {
+    content = content.replaceAllMapped(replyRegex, (match) {
+      final b64 = match.group(1);
+      if (b64 == null || b64.isEmpty) return '';
+      try {
+        final unescaped = Uri.decodeComponent(b64);
+        return utf8.decode(base64.decode(unescaped));
+      } catch (_) {
+        try {
+          return utf8.decode(base64.decode(b64));
+        } catch (_) {
+          return '';
+        }
+      }
+    });
+  }
+
+  // 2. Purgar etiquetas restantes (<think-block>, <tool-step>, XML machine tags)
+  return _stripReasoningTags(content).trim();
 }
 
 AIChatMessage assistantMessageFromDisplayContent(

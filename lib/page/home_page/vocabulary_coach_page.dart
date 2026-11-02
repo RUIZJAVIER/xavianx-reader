@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:anx_reader/service/ai/index.dart';
+import 'package:anx_reader/utils/ai_reasoning_parser.dart';
 import 'package:anx_reader/widgets/markdown/styled_markdown.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -180,10 +181,13 @@ class _VocabularyCoachPageState extends ConsumerState<VocabularyCoachPage> {
                                   ),
                                 )
                               : StyledMarkdown(
-                                  data: message.contentAsString.isEmpty &&
-                                          _isStreaming
-                                      ? 'Pensando...'
-                                      : message.contentAsString,
+                                  data: () {
+                                    final text =
+                                        chatMessageDisplayContent(message);
+                                    return text.isEmpty && _isStreaming
+                                        ? 'Pensando...'
+                                        : text;
+                                  }(),
                                 ),
                         ),
                       ),

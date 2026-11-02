@@ -37,6 +37,20 @@ class ManageVocabularyInput {
         tags: json['tags'] as String?,
       );
 
+  Map<String, dynamic> toJson() => {
+        'action': action,
+        if (id != null) 'id': id,
+        if (word != null) 'word': word,
+        if (definition != null) 'definition': definition,
+        if (contextSentence != null) 'contextSentence': contextSentence,
+        if (island != null) 'island': island,
+        'limit': limit,
+        if (associationMnemonic != null)
+          'associationMnemonic': associationMnemonic,
+        if (languageIsland != null) 'languageIsland': languageIsland,
+        if (tags != null) 'tags': tags,
+      };
+
   bool get isCreate => action.toLowerCase() == 'create';
   bool get isUpdate => action.toLowerCase() == 'update';
 

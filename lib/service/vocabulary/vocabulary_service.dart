@@ -249,7 +249,9 @@ String buildPkmMarkdown({
       if (note.readerNote != null && note.readerNote!.isNotEmpty) {
         buffer.writeln('**Nota personal:** ${note.readerNote}\n');
       }
-      buffer.writeln('*Tipo: ${note.type} | Fecha: ${note.createTime.toLocal().toString().split(' ').first}*\n');
+      final dateStr =
+          note.createTime?.toLocal().toString().split(' ').first ?? 'Sin fecha';
+      buffer.writeln('*Tipo: ${note.type} | Fecha: $dateStr*\n');
     }
   }
 

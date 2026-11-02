@@ -119,6 +119,16 @@ void main() {
           updateTime: DateTime(2026, 1, 1),
           readerNote: 'Releer este pasaje más adelante.',
         ),
+        BookNote(
+          bookId: 10,
+          content: 'Sin fecha registrada.',
+          cfi: 'epubcfi(/6/2!/4/2:0)',
+          chapter: 'Capítulo 2',
+          type: 'bookmark',
+          color: 'ffffff',
+          createTime: null,
+          updateTime: DateTime(2026, 1, 2),
+        ),
       ],
     );
 
@@ -130,5 +140,6 @@ void main() {
     expect(md, contains('### Capítulo 1'));
     expect(md, contains('> El conocimiento comienza con el asombro.'));
     expect(md, contains('**Nota personal:** Releer este pasaje más adelante.'));
+    expect(md, contains('Fecha: Sin fecha'));
   });
 }

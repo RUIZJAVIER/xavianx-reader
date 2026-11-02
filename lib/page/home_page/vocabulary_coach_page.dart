@@ -179,7 +179,7 @@ class _VocabularyCoachPageState extends ConsumerState<VocabularyCoachPage> {
                                   ),
                                 )
                               : StyledMarkdown(
-                                  text: message.contentAsString.isEmpty &&
+                                  data: message.contentAsString.isEmpty &&
                                           _isStreaming
                                       ? 'Pensando...'
                                       : message.contentAsString,

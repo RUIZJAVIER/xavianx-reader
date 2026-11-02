@@ -13,7 +13,7 @@ import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 // Current app database version
-const int currentDbVersion = 9;
+const int currentDbVersion = 10;
 
 const createBookSQL = '''
 CREATE TABLE tb_books (
@@ -109,7 +109,12 @@ CREATE TABLE IF NOT EXISTS vocabulary (
   efactor REAL NOT NULL DEFAULT 2.5,
   repetition INTEGER NOT NULL DEFAULT 0,
   interval INTEGER NOT NULL DEFAULT 0,
-  next_review_date INTEGER NOT NULL DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+  next_review_date INTEGER NOT NULL DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  fsrs_state INTEGER NOT NULL DEFAULT 1,
+  fsrs_step INTEGER,
+  stability REAL,
+  difficulty REAL,
+  last_review_date INTEGER
 )
 ''';
 
@@ -481,6 +486,34 @@ class DBHelper {
           await db.execute(
               "UPDATE vocabulary SET next_review_date = CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE next_review_date = 0");
         }
+        continue case10;
+      case10:
+      case 10:
+        // FSRS scheduling state. The SM-2 columns stay for old databases.
+        final fsrsColumns = await db.rawQuery('PRAGMA table_info(vocabulary)');
+        Future<void> addFsrsColumn(String name, String sql) async {
+          if (!fsrsColumns.any((column) => column['name'] == name)) {
+            await db.execute(sql);
+          }
+        }
+
+        await addFsrsColumn('fsrs_state',
+            'ALTER TABLE vocabulary ADD COLUMN fsrs_state INTEGER NOT NULL DEFAULT 1');
+        await addFsrsColumn(
+            'fsrs_step', 'ALTER TABLE vocabulary ADD COLUMN fsrs_step INTEGER');
+        await addFsrsColumn(
+            'stability', 'ALTER TABLE vocabulary ADD COLUMN stability REAL');
+        await addFsrsColumn(
+            'difficulty', 'ALTER TABLE vocabulary ADD COLUMN difficulty REAL');
+        await addFsrsColumn('last_review_date',
+            'ALTER TABLE vocabulary ADD COLUMN last_review_date INTEGER');
+
+        // Cards already studied under SM-2 keep their due date and become
+        // review cards; never-studied cards stay new for the dashboard.
+        await db.execute(
+            "UPDATE vocabulary SET fsrs_state = 2, stability = MAX(interval, 1), "
+            "difficulty = 5, last_review_date = next_review_date - interval * 86400000 "
+            "WHERE repetition > 0 AND last_review_date IS NULL");
     }
 
     if (oldVersion != 0 && Prefs().webdavStatus) {

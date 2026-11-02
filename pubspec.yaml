@@ -131,6 +131,8 @@ dependencies:
   haptic_feedback: ^0.6.4+2
   in_app_purchase_android: ^0.5.3
   webview_cef: ^0.5.1
+  fsrs: ^2.0.1
+  flip_card_plus: ^1.0.5
 
 dependency_overrides:
   # Play Billing Library 8 (required by Google Play). in_app_purchase 3.2.x

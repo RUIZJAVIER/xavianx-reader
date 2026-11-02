@@ -29,14 +29,13 @@ class VocabularyDao extends BaseDao {
   Future<List<VocabularyDeck>> fetchDecks({DateTime? now}) {
     final dueBefore = (now ?? DateTime.now()).millisecondsSinceEpoch;
     return rawQueryList(
-      // repetition 0 = never answered (Anki "new"); the rest are due reviews.
+      // No last review = never studied (Anki "new"); the rest are due reviews.
       'SELECT $_islandExpr AS island, '
-      'SUM(CASE WHEN repetition = 0 AND next_review_date <= ? THEN 1 ELSE 0 END) '
-      'AS new_cards, '
-      'SUM(CASE WHEN repetition > 0 AND next_review_date <= ? THEN 1 ELSE 0 END) '
-      'AS due '
+      'SUM(CASE WHEN last_review_date IS NULL THEN 1 ELSE 0 END) AS new_cards, '
+      'SUM(CASE WHEN last_review_date IS NOT NULL AND next_review_date <= ? '
+      'THEN 1 ELSE 0 END) AS due '
       'FROM $table GROUP BY island ORDER BY island COLLATE NOCASE',
-      arguments: [dueBefore, dueBefore],
+      arguments: [dueBefore],
       mapper: VocabularyDeck.fromDb,
     );
   }
@@ -98,20 +97,27 @@ class VocabularyDao extends BaseDao {
     return updated > 0;
   }
 
-  Future<bool> updateSrs(
+  Future<bool> updateFsrs(
     int id, {
-    required double efactor,
-    required int repetition,
+    required int state,
+    required int? step,
+    required double? stability,
+    required double? difficulty,
     required int interval,
     required int nextReviewDate,
+    required int lastReviewDate,
   }) async {
     final updated = await update(
       table,
       {
-        'efactor': efactor,
-        'repetition': repetition,
+        'fsrs_state': state,
+        'fsrs_step': step,
+        'stability': stability,
+        'difficulty': difficulty,
+        // Kept in sync for old readers and the CSV export.
         'interval': interval,
         'next_review_date': nextReviewDate,
+        'last_review_date': lastReviewDate,
       },
       where: 'id = ?',
       whereArgs: [id],

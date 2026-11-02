@@ -1,11 +1,10 @@
-import 'dart:math';
-
 import 'package:anx_reader/dao/vocabulary.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/models/vocabulary.dart';
 import 'package:anx_reader/service/vocabulary/vocabulary_service.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/widgets/vocabulary/vocabulary_rich_text.dart';
+import 'package:flip_card_plus/flip_card_plus.dart';
 import 'package:flutter/material.dart';
 
 class VocabularyReviewPage extends StatefulWidget {
@@ -36,23 +35,20 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
     setState(() => _cards = cards);
   }
 
-  Future<void> _answer(int quality) async {
-    if (_busy || !_revealed) return;
-    final card = _cards![_index];
-    final update = applySm2(
-      quality: quality,
-      efactor: card.efactor,
-      repetition: card.repetition,
-      interval: card.interval,
-    );
+  Future<void> _answer(Vocabulary card, int rating) async {
+    if (_busy) return;
+    final update = scheduleFsrs(card, rating);
     setState(() => _busy = true);
     try {
-      await vocabularyDao.updateSrs(
+      await vocabularyDao.updateFsrs(
         card.id,
-        efactor: update.efactor,
-        repetition: update.repetition,
+        state: update.state,
+        step: update.step,
+        stability: update.stability,
+        difficulty: update.difficulty,
         interval: update.interval,
         nextReviewDate: update.nextReviewDate,
+        lastReviewDate: update.lastReviewDate,
       );
       if (!mounted) return;
       setState(() {
@@ -81,13 +77,34 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
     );
   }
 
-  Widget _answerButton(String label, int quality, Vocabulary card) {
-    final interval = applySm2(
-      quality: quality,
-      efactor: card.efactor,
-      repetition: card.repetition,
-      interval: card.interval,
-    ).interval;
+  Widget _face(Widget child) {
+    return SizedBox.expand(
+      child: Card(
+        margin: EdgeInsets.zero,
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  String _formatInterval(Duration interval) {
+    if (interval.inDays >= 1) return '${interval.inDays}d';
+    if (interval.inHours >= 1) return '${interval.inHours}h';
+    return '${interval.inMinutes.clamp(1, 59)}m';
+  }
+
+  Widget _answerButton(
+    String label,
+    int rating,
+    Vocabulary card,
+    DateTime now,
+  ) {
+    final update = scheduleFsrs(card, rating, now: now);
+    final interval = DateTime.fromMillisecondsSinceEpoch(update.nextReviewDate)
+        .difference(now);
     return Expanded(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 2),
@@ -95,12 +112,13 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
           style: FilledButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
           ),
-          onPressed: _busy ? null : () => _answer(quality),
+          onPressed: _busy ? null : () => _answer(card, rating),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(label, textAlign: TextAlign.center),
-              Text('${interval}d', style: const TextStyle(fontSize: 11)),
+              Text(_formatInterval(interval),
+                  style: const TextStyle(fontSize: 11)),
             ],
           ),
         ),
@@ -149,74 +167,89 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
       );
     } else {
       final card = cards[_index];
+      final now = DateTime.now();
       body = Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             Expanded(
-              child: _FlipCard(
+              child: FlipCardPlus(
                 key: ValueKey(card.id),
-                showBack: _revealed,
-                onTap:
-                    _busy ? null : () => setState(() => _revealed = !_revealed),
-                front: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      card.word,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    if (card.contextSentence.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        card.contextSentence,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontStyle: FontStyle.italic,
-                          color: Theme.of(context).hintColor,
-                        ),
+                duration: const Duration(milliseconds: 450),
+                fill: Fill.back,
+                borderRadius: BorderRadius.circular(16),
+                isDisabled: _busy,
+                onFlipDone: (side) {
+                  if (!mounted) return;
+                  setState(() => _revealed = side == CardSide.back);
+                },
+                front: _face(
+                  Center(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            card.word,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineSmall
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          if (card.contextSentence.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              card.contextSentence,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontStyle: FontStyle.italic,
+                                color: Theme.of(context).hintColor,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 24),
+                          Icon(Icons.touch_app_outlined,
+                              color: Theme.of(context).hintColor),
+                          Text(
+                            l10n.vocabularyShowAnswer,
+                            style:
+                                TextStyle(color: Theme.of(context).hintColor),
+                          ),
+                        ],
                       ),
-                    ],
-                    const SizedBox(height: 24),
-                    Icon(Icons.touch_app_outlined,
-                        color: Theme.of(context).hintColor),
-                    Text(
-                      l10n.vocabularyShowAnswer,
-                      style: TextStyle(color: Theme.of(context).hintColor),
                     ),
-                  ],
+                  ),
                 ),
-                back: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Text(
-                          card.word,
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleLarge
-                              ?.copyWith(fontWeight: FontWeight.bold),
+                back: _face(
+                  SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: Text(
+                            card.word,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      if (card.definition.isNotEmpty)
-                        _section(
-                            Icons.translate, VocabularyRichText(card.definition)),
-                      if (card.languageIsland?.isNotEmpty ?? false)
-                        _section(
-                            Icons.map_outlined, Text(card.languageIsland!)),
-                      if (card.associationMnemonic?.isNotEmpty ?? false)
-                        _section(
-                          Icons.psychology_outlined,
-                          VocabularyRichText(card.associationMnemonic!),
-                        ),
-                    ],
+                        const SizedBox(height: 12),
+                        if (card.definition.isNotEmpty)
+                          _section(Icons.translate,
+                              VocabularyRichText(card.definition)),
+                        if (card.languageIsland?.isNotEmpty ?? false)
+                          _section(
+                              Icons.map_outlined, Text(card.languageIsland!)),
+                        if (card.associationMnemonic?.isNotEmpty ?? false)
+                          _section(
+                            Icons.psychology_outlined,
+                            VocabularyRichText(card.associationMnemonic!),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -225,10 +258,10 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
               const SizedBox(height: 12),
               Row(
                 children: [
-                  _answerButton(l10n.vocabularyForgot, 0, card),
-                  _answerButton(l10n.vocabularyHard, 3, card),
-                  _answerButton(l10n.vocabularyGood, 4, card),
-                  _answerButton(l10n.vocabularyEasy, 5, card),
+                  _answerButton(l10n.vocabularyForgot, 1, card, now),
+                  _answerButton(l10n.vocabularyHard, 2, card, now),
+                  _answerButton(l10n.vocabularyGood, 3, card, now),
+                  _answerButton(l10n.vocabularyEasy, 4, card, now),
                 ],
               ),
             ],
@@ -251,59 +284,6 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
         ],
       ),
       body: body,
-    );
-  }
-}
-
-/// 3D Y-axis flip driven by [showBack]. The implicit animation makes the card
-/// reset to the front when its key (the card id) changes.
-class _FlipCard extends StatelessWidget {
-  const _FlipCard({
-    super.key,
-    required this.showBack,
-    required this.front,
-    required this.back,
-    this.onTap,
-  });
-
-  final bool showBack;
-  final Widget front;
-  final Widget back;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: TweenAnimationBuilder<double>(
-        tween: Tween<double>(begin: 0.0, end: showBack ? 1.0 : 0.0),
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeInOut,
-        builder: (context, value, _) {
-          final angle = value * pi;
-          final showingBack = angle > pi / 2;
-          return Transform(
-            alignment: Alignment.center,
-            transform: Matrix4.identity()
-              ..setEntry(3, 2, 0.001)
-              ..rotateY(angle),
-            child: Card(
-              margin: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: showingBack
-                    ? Transform(
-                        alignment: Alignment.center,
-                        transform: Matrix4.identity()..rotateY(pi),
-                        child: back,
-                      )
-                    : front,
-              ),
-            ),
-          );
-        },
-      ),
     );
   }
 }

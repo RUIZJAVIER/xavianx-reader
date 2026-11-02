@@ -38,51 +38,58 @@ void main() {
     expect(csv, contains('<font color=""#e53935"">in-trepid</font>'));
   });
 
-  test('applySm2 grows the interval and resets it after forgetting', () {
-    final now = DateTime(2026, 1, 1, 12);
-
-    final first = applySm2(
-      quality: 4,
-      efactor: 2.5,
-      repetition: 0,
-      interval: 0,
-      now: now,
+  test('scheduleFsrs records the review and advances a new card', () {
+    final now = DateTime.utc(2026, 1, 1, 12);
+    final card = Vocabulary(
+      id: 1,
+      word: 'química',
+      contextSentence: '',
+      definition: 'science',
+      associationMnemonic: null,
+      languageIsland: 'lab',
+      timestamp: now,
     );
-    expect(first.repetition, 1);
-    expect(first.interval, 1);
-    expect(first.nextReviewDate,
-        now.add(const Duration(days: 1)).millisecondsSinceEpoch);
 
-    final second = applySm2(
-      quality: 4,
-      efactor: first.efactor,
-      repetition: first.repetition,
-      interval: first.interval,
-      now: now,
-    );
-    expect(second.repetition, 2);
-    expect(second.interval, 6);
+    final good = scheduleFsrs(card, 3, now: now);
+    expect(good.lastReviewDate, now.millisecondsSinceEpoch);
+    expect(good.nextReviewDate, greaterThan(now.millisecondsSinceEpoch));
 
-    final third = applySm2(
-      quality: 5,
-      efactor: second.efactor,
-      repetition: second.repetition,
-      interval: second.interval,
-      now: now,
-    );
-    expect(third.repetition, 3);
-    expect(third.interval, (6 * second.efactor).round());
-    expect(third.efactor, closeTo(2.6, 0.0001));
+    final again = scheduleFsrs(card, 1, now: now);
+    expect(again.state, 1);
+    expect(again.step, 0);
+    expect(again.nextReviewDate,
+        now.add(const Duration(minutes: 1)).millisecondsSinceEpoch);
 
-    final forgot = applySm2(
-      quality: 0,
-      efactor: third.efactor,
-      repetition: third.repetition,
-      interval: third.interval,
-      now: now,
+    final easy = scheduleFsrs(card, 4, now: now);
+    expect(easy.state, 2);
+    expect(easy.stability, isNotNull);
+    expect(easy.difficulty, isNotNull);
+    expect(easy.nextReviewDate,
+        greaterThanOrEqualTo(now.add(const Duration(days: 1)).millisecondsSinceEpoch));
+  });
+
+  test('scheduleFsrs sends a forgotten review card to relearning', () {
+    final now = DateTime.utc(2026, 1, 11, 12);
+    final card = Vocabulary(
+      id: 2,
+      word: 'intrépido',
+      contextSentence: '',
+      definition: 'fearless',
+      associationMnemonic: null,
+      languageIsland: 'aventura',
+      timestamp: now.subtract(const Duration(days: 10)),
+      fsrsState: 2,
+      stability: 10,
+      difficulty: 5,
+      lastReviewDate:
+          now.subtract(const Duration(days: 10)).millisecondsSinceEpoch,
+      nextReviewDate: now.millisecondsSinceEpoch,
     );
-    expect(forgot.repetition, 0);
-    expect(forgot.interval, 1);
-    expect(forgot.efactor, greaterThanOrEqualTo(1.3));
+
+    final forgot = scheduleFsrs(card, 1, now: now);
+    expect(forgot.state, 3);
+    expect(forgot.step, 0);
+    expect(forgot.nextReviewDate,
+        now.add(const Duration(minutes: 10)).millisecondsSinceEpoch);
   });
 }

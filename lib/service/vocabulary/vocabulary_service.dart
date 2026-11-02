@@ -6,6 +6,7 @@ import 'package:anx_reader/utils/convert_string_to_uint8list.dart';
 import 'package:anx_reader/utils/log/common.dart';
 import 'package:anx_reader/utils/save_file_to_download.dart';
 import 'package:csv/csv.dart';
+import 'package:fsrs/fsrs.dart';
 import 'package:langchain_core/chat_models.dart';
 
 const String fallbackLanguageIsland = generalLanguageIsland;
@@ -89,48 +90,52 @@ Future<int> saveVocabulary({
   );
 }
 
-typedef Sm2Update = ({
-  double efactor,
-  int repetition,
+typedef FsrsUpdate = ({
+  int state,
+  int? step,
+  double? stability,
+  double? difficulty,
   int interval,
   int nextReviewDate,
+  int lastReviewDate,
 });
 
-/// Applies one SM-2 answer (0-5) and returns the next scheduling state.
-Sm2Update applySm2({
-  required int quality,
-  required double efactor,
-  required int repetition,
-  required int interval,
-  DateTime? now,
-}) {
-  final q = quality.clamp(0, 5).toInt();
-  var nextEfactor = efactor + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
-  if (nextEfactor < 1.3) nextEfactor = 1.3;
+/// One FSRS answer (1 again, 2 hard, 3 good, 4 easy) and its next state.
+/// Fuzzing is disabled so the interval shown on the buttons is the one saved.
+final Scheduler _scheduler = Scheduler(enableFuzzing: false);
 
-  int nextRepetition;
-  int nextInterval;
-  if (q < 3) {
-    nextRepetition = 0;
-    nextInterval = 1;
-  } else {
-    nextRepetition = repetition + 1;
-    if (repetition == 0) {
-      nextInterval = 1;
-    } else if (repetition == 1) {
-      nextInterval = 6;
-    } else {
-      // SM-2 grows the interval with the EF from before this answer.
-      nextInterval = (interval * efactor).round();
-    }
-  }
+FsrsUpdate scheduleFsrs(Vocabulary card, int rating, {DateTime? now}) {
+  final reviewedAt = (now ?? DateTime.now()).toUtc();
+  final due = card.nextReviewDate > 0
+      ? DateTime.fromMillisecondsSinceEpoch(card.nextReviewDate, isUtc: true)
+      : reviewedAt;
+  final lastReview = card.lastReviewDate == null
+      ? null
+      : DateTime.fromMillisecondsSinceEpoch(card.lastReviewDate!, isUtc: true);
+  final result = _scheduler.reviewCard(
+    Card(
+      cardId: card.id,
+      state: State.fromValue(card.fsrsState),
+      step: card.fsrsStep,
+      stability: card.stability,
+      difficulty: card.difficulty,
+      due: due,
+      lastReview: lastReview,
+    ),
+    Rating.fromValue(rating),
+    reviewDateTime: reviewedAt,
+  );
 
-  final nextDate = (now ?? DateTime.now()).add(Duration(days: nextInterval));
+  final next = result.card;
+  final interval = next.due.difference(reviewedAt);
   return (
-    efactor: nextEfactor,
-    repetition: nextRepetition,
-    interval: nextInterval,
-    nextReviewDate: nextDate.millisecondsSinceEpoch,
+    state: next.state.value,
+    step: next.step,
+    stability: next.stability,
+    difficulty: next.difficulty,
+    interval: interval.inDays,
+    nextReviewDate: next.due.millisecondsSinceEpoch,
+    lastReviewDate: reviewedAt.millisecondsSinceEpoch,
   );
 }
 

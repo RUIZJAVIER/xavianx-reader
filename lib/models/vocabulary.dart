@@ -30,9 +30,11 @@ class Vocabulary {
     required this.associationMnemonic,
     required this.languageIsland,
     required this.timestamp,
-    this.efactor = 2.5,
-    this.repetition = 0,
-    this.interval = 0,
+    this.fsrsState = 1,
+    this.fsrsStep,
+    this.stability,
+    this.difficulty,
+    this.lastReviewDate,
     this.nextReviewDate = 0,
   });
 
@@ -44,11 +46,13 @@ class Vocabulary {
   final String? languageIsland;
   final DateTime timestamp;
 
-  /// SM-2 scheduling state. [nextReviewDate] is milliseconds since epoch;
-  /// 0 means the card is due immediately.
-  final double efactor;
-  final int repetition;
-  final int interval;
+  /// FSRS scheduling state. [nextReviewDate] and [lastReviewDate] are
+  /// milliseconds since epoch; a null [lastReviewDate] means a new card.
+  final int fsrsState;
+  final int? fsrsStep;
+  final double? stability;
+  final double? difficulty;
+  final int? lastReviewDate;
   final int nextReviewDate;
 
   Map<String, Object?> toMap() {
@@ -59,9 +63,11 @@ class Vocabulary {
       'association_mnemonic': associationMnemonic,
       'language_island': languageIsland,
       'timestamp': timestamp.toIso8601String(),
-      'efactor': efactor,
-      'repetition': repetition,
-      'interval': interval,
+      'fsrs_state': fsrsState,
+      'fsrs_step': fsrsStep,
+      'stability': stability,
+      'difficulty': difficulty,
+      'last_review_date': lastReviewDate,
       'next_review_date': nextReviewDate,
     };
   }
@@ -72,10 +78,6 @@ class Vocabulary {
     String? definition,
     String? associationMnemonic,
     String? languageIsland,
-    double? efactor,
-    int? repetition,
-    int? interval,
-    int? nextReviewDate,
   }) {
     return Vocabulary(
       id: id,
@@ -85,10 +87,12 @@ class Vocabulary {
       associationMnemonic: associationMnemonic ?? this.associationMnemonic,
       languageIsland: languageIsland ?? this.languageIsland,
       timestamp: timestamp,
-      efactor: efactor ?? this.efactor,
-      repetition: repetition ?? this.repetition,
-      interval: interval ?? this.interval,
-      nextReviewDate: nextReviewDate ?? this.nextReviewDate,
+      fsrsState: fsrsState,
+      fsrsStep: fsrsStep,
+      stability: stability,
+      difficulty: difficulty,
+      lastReviewDate: lastReviewDate,
+      nextReviewDate: nextReviewDate,
     );
   }
 
@@ -102,9 +106,11 @@ class Vocabulary {
       languageIsland: map['language_island'] as String?,
       timestamp:
           DateTime.tryParse(map['timestamp'] as String? ?? '') ?? DateTime.now(),
-      efactor: (map['efactor'] as num?)?.toDouble() ?? 2.5,
-      repetition: map['repetition'] as int? ?? 0,
-      interval: map['interval'] as int? ?? 0,
+      fsrsState: map['fsrs_state'] as int? ?? 1,
+      fsrsStep: map['fsrs_step'] as int?,
+      stability: (map['stability'] as num?)?.toDouble(),
+      difficulty: (map['difficulty'] as num?)?.toDouble(),
+      lastReviewDate: map['last_review_date'] as int?,
       nextReviewDate: map['next_review_date'] as int? ?? 0,
     );
   }

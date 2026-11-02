@@ -1635,5 +1635,29 @@ export const makePDF = async file => {
     }
     book.getTOCFragment = doc => doc.documentElement
     book.getCover = async () => renderCover(await getPage(0))
+    book.destroy = async () => {
+        try {
+            for (const urlPromise of shellPromises.values()) {
+                try {
+                    const resolved = await urlPromise
+                    if (typeof resolved === 'string' && resolved.startsWith('blob:')) {
+                        URL.revokeObjectURL(resolved)
+                    }
+                } catch (_) {}
+            }
+            shellPromises.clear()
+            pagePromises.clear()
+            textPromises.clear()
+            annotationPromises.clear()
+            if (pdf && typeof pdf.destroy === 'function') {
+                await pdf.destroy()
+            }
+        } catch (_) {}
+    }
+    if (typeof window !== 'undefined') {
+        globalThis.clearPdfCache = () => {
+            try { book.destroy() } catch (_) {}
+        }
+    }
     return book
 }

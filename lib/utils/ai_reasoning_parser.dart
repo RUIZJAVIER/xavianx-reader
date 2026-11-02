@@ -91,15 +91,29 @@ ParsedReasoning parseReasoningContent(String content) {
   return ParsedReasoning(timeline: timeline);
 }
 
-/// Removes `<think>...</think>` blocks and agent `<think-block .../>` markers.
+/// Removes `<think>...</think>`, `<think-block>...</think-block>`, and `<tool-step>...</tool-step>` blocks.
 String _stripReasoningTags(String content) {
   var result = content.replaceAll(
+    RegExp(r'<think-block(?:\s[^>]*)?>[\s\S]*?<\/think-block\s*>',
+        caseSensitive: false),
+    '',
+  );
+  result = result.replaceAll(
+    RegExp(r'<tool-step(?:\s[^>]*)?>[\s\S]*?<\/tool-step\s*>',
+        caseSensitive: false),
+    '',
+  );
+  result = result.replaceAll(
     RegExp(r'<think(?:\s[^>]*)?>[\s\S]*?<\/think\s*>',
         caseSensitive: false),
     '',
   );
   result = result.replaceAll(
     RegExp(r'<think-block\b[^>]*/>', caseSensitive: false),
+    '',
+  );
+  result = result.replaceAll(
+    RegExp(r'<tool-step\b[^>]*/>', caseSensitive: false),
     '',
   );
   result = result.replaceAll(
@@ -110,6 +124,18 @@ String _stripReasoningTags(String content) {
     RegExp(r'<\/?think(?:\s[^>]*)?>', caseSensitive: false),
     '',
   );
+  result = result.replaceAll(
+    RegExp(r'<think-block\b.*$', caseSensitive: false),
+    '',
+  );
+  result = result.replaceAll(
+    RegExp(r'<tool-step\b.*$', caseSensitive: false),
+    '',
+  );
+  result = result.replaceAll(
+    RegExp(r'<think\b.*$', caseSensitive: false),
+    '',
+  );
   return result;
 }
 
@@ -117,14 +143,15 @@ ReasoningEnvelope splitReasoningEnvelope(String content) {
   final thinkRegex = RegExp(r'<think>([\s\S]*?)<\/think>');
   final matches = thinkRegex.allMatches(content).toList(growable: false);
   if (matches.isEmpty) {
-    return ReasoningEnvelope(reasoningContent: '', answerContent: content);
+    final cleaned = _stripReasoningTags(content).trim();
+    return ReasoningEnvelope(reasoningContent: '', answerContent: cleaned);
   }
 
   final reasoning = matches
       .map((match) => match.group(1) ?? '')
       .where((part) => part.isNotEmpty)
       .join('\n');
-  var answer = content.replaceAll(thinkRegex, '');
+  var answer = _stripReasoningTags(content);
   answer = answer.replaceFirst(RegExp(r'^\r?\n'), '');
 
   return ReasoningEnvelope(
@@ -150,7 +177,7 @@ String chatMessageDisplayContent(ChatMessage message) {
   // Do not include `reasoningContent` in the displayed text. Some providers
   // stream their chain of thought in English; the chat must only show the
   // final answer.
-  return message.contentAsString;
+  return _stripReasoningTags(message.contentAsString).trim();
 }
 
 AIChatMessage assistantMessageFromDisplayContent(

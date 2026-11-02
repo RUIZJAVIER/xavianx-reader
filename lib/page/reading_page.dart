@@ -154,6 +154,10 @@ class ReadingPageState extends ConsumerState<ReadingPage>
     );
     _sessionStart = null;
     audioHandler.stop();
+    if (_isPdfBook) {
+      unawaited(epubPlayerKey.currentState?.clearPdfCache() ??
+          clearPdfTempStorage());
+    }
     // if (_volumeKeyListenerAttached) {
     //   unawaited(_volumeKeyBoard.removeListener());
     // }
@@ -794,6 +798,10 @@ class ReadingPageState extends ConsumerState<ReadingPage>
                   leading: IconButton(
                     icon: const Icon(Icons.arrow_back),
                     onPressed: () {
+                      if (_isPdfBook) {
+                        unawaited(epubPlayerKey.currentState?.clearPdfCache() ??
+                            clearPdfTempStorage());
+                      }
                       // close reading page
                       Navigator.pop(context);
                     },

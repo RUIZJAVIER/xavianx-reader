@@ -1,7 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
+
+import 'package:anx_reader/utils/get_path/get_cache_dir.dart';
+import 'package:anx_reader/utils/get_path/get_temp_dir.dart';
+import 'package:path/path.dart' as path;
 
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/dao/book.dart';
@@ -1507,11 +1512,31 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     }
   }
 
+  bool _pdfCacheCleared = false;
+
+  /// Limpia la memoria, el WebView y los archivos temporales de páginas PDF.
+  Future<void> clearPdfCache() async {
+    if (!_isPdf || _pdfCacheCleared) return;
+    _pdfCacheCleared = true;
+    _ocrTextCache.clear();
+    _ocrServedPages.clear();
+    try {
+      await webViewController.execute(
+        'try { if (window.clearPdfCache) window.clearPdfCache(); if (window.book?.destroy) window.book.destroy(); } catch (_) {}',
+      );
+      await webViewController.clearCache();
+    } catch (_) {}
+    await clearPdfTempStorage();
+  }
+
   @override
   void dispose() {
     _scrollDebounceTimer?.cancel();
     _selectionDebounce?.cancel();
     _animationController?.dispose();
+    if (_isPdf) {
+      unawaited(clearPdfCache());
+    }
     saveReadingProgress();
     removeOverlay();
     super.dispose();
@@ -1826,5 +1851,37 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
         ),
       ),
     );
+  }
+}
+
+/// Vacía los archivos y carpetas temporales de renderizado de PDF en caché/temp.
+Future<void> clearPdfTempStorage() async {
+  try {
+    final dirs = <Directory>[
+      await getAnxCacheDir(),
+      await getAnxTempDir(),
+    ];
+    for (final dir in dirs) {
+      if (!dir.existsSync()) continue;
+      try {
+        final entries = dir.listSync(followLinks: false);
+        for (final entity in entries) {
+          final name = path.basename(entity.path).toLowerCase();
+          if (name.startsWith('pdf_') ||
+              name.contains('pdf_cache') ||
+              name.endsWith('.pdf.tmp')) {
+            try {
+              if (entity is File) {
+                entity.deleteSync();
+              } else if (entity is Directory) {
+                entity.deleteSync(recursive: true);
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+  } catch (e) {
+    AnxLog.warning('clearPdfTempStorage error: $e');
   }
 }

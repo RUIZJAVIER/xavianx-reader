@@ -54,4 +54,13 @@ class InAppEpubWebViewController implements EpubWebViewController {
       return null;
     }
   }
+
+  @override
+  Future<void> clearCache() async {
+    try {
+      await _controller.clearCache();
+    } catch (e) {
+      debugPrint('InApp clearCache failed: $e');
+    }
+  }
 }

@@ -136,6 +136,9 @@ class LinuxEpubWebViewController implements EpubWebViewController {
     return null;
   }
 
+  @override
+  Future<void> clearCache() async {}
+
   Future<void> _handleBridgeMessage(cef.JavascriptMessage message) async {
     try {
       final payload = jsonDecode(message.message) as Map<String, dynamic>;

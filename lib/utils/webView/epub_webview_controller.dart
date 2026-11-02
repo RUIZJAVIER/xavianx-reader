@@ -40,4 +40,7 @@ abstract class EpubWebViewController {
   /// that have no selectable text layer. Returns null when the platform does
   /// not support screenshots (e.g. Linux CEF).
   Future<Uint8List?> takeScreenshot();
+
+  /// Clears webview cache (rendered pages, canvas buffers, temporary tiles).
+  Future<void> clearCache();
 }

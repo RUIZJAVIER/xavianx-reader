@@ -23,6 +23,8 @@ class SystemTts extends BaseTts {
 
   final FlutterTts flutterTts = FlutterTts();
 
+  static const _engineTimeout = Duration(seconds: 5);
+
   String? _currentVoiceText;
   static String? _prevVoiceText;
 
@@ -140,20 +142,26 @@ class SystemTts extends BaseTts {
   }
 
   Future<void> getDefaultEngine() async {
-    var engine = await flutterTts.getDefaultEngine;
-    if (engine != null) {}
+    try {
+      await flutterTts.getDefaultEngine.timeout(_engineTimeout);
+    } catch (e) {
+      AnxLog.warning('System TTS default engine unavailable: $e');
+    }
   }
 
   Future<void> getDefaultVoice() async {
-    var voice = await flutterTts.getDefaultVoice;
-    if (voice != null) {}
+    try {
+      await flutterTts.getDefaultVoice.timeout(_engineTimeout);
+    } catch (e) {
+      AnxLog.warning('System TTS default voice unavailable: $e');
+    }
   }
 
   /// Apply the voice by shortName
   Future<void> _applyVoice(String? voiceShortName) async {
     try {
       // Get all voices to find the matching one
-      final voices = await flutterTts.getVoices;
+      final voices = await flutterTts.getVoices.timeout(_engineTimeout);
       if (voices is List) {
         for (var voice in voices) {
           final map = Map<String, dynamic>.from(voice);
@@ -313,35 +321,31 @@ class SystemTts extends BaseTts {
     if (isLinux) {
       return [];
     }
-    try {
-      await _ensureAndroidEngine();
+    await _ensureAndroidEngine();
 
-      dynamic voices = await flutterTts.getVoices;
+    dynamic voices = await flutterTts.getVoices.timeout(_engineTimeout);
 
-      // En Android el motor puede terminar de inicializar tarde: si la lista
-      // viene vacía se reintenta una vez.
-      if ((voices is! List || voices.isEmpty) && isAndroid) {
-        await Future.delayed(const Duration(milliseconds: 600));
-        await _ensureAndroidEngine(force: true);
-        voices = await flutterTts.getVoices;
-      }
-
-      if (voices is List) {
-        final list = voices.map((e) {
-          final map = Map<String, dynamic>.from(e);
-          return TtsVoice(
-              shortName: map['name'] ?? '',
-              name: map['name'] ?? '',
-              locale: map['locale']?.replaceAll('_', '-') ?? '',
-              gender: map['gender']?.toString().toLowerCase() ?? '',
-              rawData: map);
-        }).toList();
-        return _sortVoices(list);
-      }
-      return [];
-    } catch (e) {
-      return [];
+    // En Android el motor puede terminar de inicializar tarde: si la lista
+    // viene vacía se reintenta una vez.
+    if ((voices is! List || voices.isEmpty) && isAndroid) {
+      await Future.delayed(const Duration(milliseconds: 600));
+      await _ensureAndroidEngine(force: true);
+      voices = await flutterTts.getVoices.timeout(_engineTimeout);
     }
+
+    if (voices is List) {
+      final list = voices.map((e) {
+        final map = Map<String, dynamic>.from(e);
+        return TtsVoice(
+            shortName: map['name'] ?? '',
+            name: map['name'] ?? '',
+            locale: map['locale']?.replaceAll('_', '-') ?? '',
+            gender: map['gender']?.toString().toLowerCase() ?? '',
+            rawData: map);
+      }).toList();
+      return _sortVoices(list);
+    }
+    return [];
   }
 
   /// Android solo devuelve las voces cuando el motor TTS está inicializado.
@@ -349,11 +353,11 @@ class SystemTts extends BaseTts {
     if (!isAndroid) return;
     if (_androidEngineReady && !force) return;
     try {
-      final engine = await flutterTts.getDefaultEngine;
+      final engine = await flutterTts.getDefaultEngine.timeout(_engineTimeout);
       if (engine is String && engine.isNotEmpty) {
-        await flutterTts.setEngine(engine);
+        await flutterTts.setEngine(engine).timeout(_engineTimeout);
       }
-      await flutterTts.setSharedInstance(true);
+      await flutterTts.setSharedInstance(true).timeout(_engineTimeout);
     } catch (e) {
       AnxLog.warning('System TTS engine initialization failed: $e');
     }

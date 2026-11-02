@@ -1,3 +1,4 @@
+import 'package:anx_reader/models/book_note.dart';
 import 'package:anx_reader/models/vocabulary.dart';
 import 'package:anx_reader/service/vocabulary/vocabulary_service.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -91,5 +92,43 @@ void main() {
     expect(forgot.step, 0);
     expect(forgot.nextReviewDate,
         now.add(const Duration(minutes: 10)).millisecondsSinceEpoch);
+  });
+
+  test('buildPkmMarkdown exports vocabulary and notes formatted for PKM apps', () {
+    final md = buildPkmMarkdown(
+      vocabulary: [
+        Vocabulary(
+          id: 1,
+          word: 'epifanía',
+          contextSentence: 'Tuvo una epifanía repentina.',
+          definition: 'manifestación o revelación',
+          associationMnemonic: 'Epi + fanía = revelación',
+          languageIsland: 'filosofía',
+          timestamp: DateTime(2026, 1, 1),
+        ),
+      ],
+      notes: [
+        BookNote(
+          bookId: 10,
+          content: 'El conocimiento comienza con el asombro.',
+          cfi: 'epubcfi(/6/2!/4/1:0)',
+          chapter: 'Capítulo 1',
+          type: 'highlight',
+          color: '000000',
+          createTime: DateTime(2026, 1, 1),
+          updateTime: DateTime(2026, 1, 1),
+          readerNote: 'Releer este pasaje más adelante.',
+        ),
+      ],
+    );
+
+    expect(md, contains('# Mi Cerebro - Vocabulario y Apuntes'));
+    expect(md, contains('### Isla: filosofía'));
+    expect(md, contains('#### epifanía'));
+    expect(md, contains('- **Definición**: manifestación o revelación'));
+    expect(md, contains('- **Mnemotecnia**: Epi + fanía = revelación'));
+    expect(md, contains('### Capítulo 1'));
+    expect(md, contains('> El conocimiento comienza con el asombro.'));
+    expect(md, contains('**Nota personal:** Releer este pasaje más adelante.'));
   });
 }

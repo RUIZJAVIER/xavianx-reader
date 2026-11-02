@@ -6,6 +6,7 @@ import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/widgets/vocabulary/vocabulary_rich_text.dart';
 import 'package:flip_card_plus/flip_card_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 
 class VocabularyReviewPage extends StatefulWidget {
   const VocabularyReviewPage({super.key, this.island});
@@ -22,11 +23,29 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
   int _index = 0;
   bool _revealed = false;
   bool _busy = false;
+  late final FlutterTts _flutterTts;
 
   @override
   void initState() {
     super.initState();
+    _flutterTts = FlutterTts();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _flutterTts.stop();
+    super.dispose();
+  }
+
+  Future<void> _speakCard(Vocabulary card) async {
+    try {
+      final text = card.contextSentence.isNotEmpty
+          ? '${card.word}. ${card.contextSentence}'
+          : card.word;
+      await _flutterTts.stop();
+      await _flutterTts.speak(text);
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -37,6 +56,7 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
 
   Future<void> _answer(Vocabulary card, int rating) async {
     if (_busy) return;
+    _flutterTts.stop();
     final update = scheduleFsrs(card, rating);
     setState(() => _busy = true);
     try {
@@ -181,7 +201,11 @@ class _VocabularyReviewPageState extends State<VocabularyReviewPage> {
                 isDisabled: _busy,
                 onFlipDone: (side) {
                   if (!mounted) return;
-                  setState(() => _revealed = side == CardSide.back);
+                  final isBack = side == CardSide.back;
+                  setState(() => _revealed = isBack);
+                  if (isBack) {
+                    _speakCard(card);
+                  }
                 },
                 front: _face(
                   Center(

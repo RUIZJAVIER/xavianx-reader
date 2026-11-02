@@ -21,6 +21,7 @@ class LangchainAiRegistry {
   LangchainPipeline resolve(
     LangchainAiConfig config, {
     bool useAgent = false,
+    ChatMessage? customSystemMessage,
   }) {
     switch (config.identifier) {
       case 'claude':
@@ -28,12 +29,14 @@ class LangchainAiRegistry {
           config,
           _buildAnthropic(config),
           useAgent: useAgent,
+          customSystemMessage: customSystemMessage,
         );
       case 'gemini':
         return _buildPipeline(
           config,
           _buildGoogle(config),
           useAgent: useAgent,
+          customSystemMessage: customSystemMessage,
         );
       case 'deepseek':
       case 'openrouter':
@@ -44,6 +47,7 @@ class LangchainAiRegistry {
           config,
           _buildOpenAi(config),
           useAgent: useAgent,
+          customSystemMessage: customSystemMessage,
         );
     }
   }
@@ -53,6 +57,7 @@ class LangchainAiRegistry {
     AiProtocol protocol,
     LangchainAiConfig config, {
     bool useAgent = false,
+    ChatMessage? customSystemMessage,
   }) {
     switch (protocol) {
       case AiProtocol.claude:
@@ -60,18 +65,21 @@ class LangchainAiRegistry {
           config,
           _buildAnthropic(config),
           useAgent: useAgent,
+          customSystemMessage: customSystemMessage,
         );
       case AiProtocol.gemini:
         return _buildPipeline(
           config,
           _buildGoogle(config),
           useAgent: useAgent,
+          customSystemMessage: customSystemMessage,
         );
       case AiProtocol.openai:
         return _buildPipeline(
           config,
           _buildOpenAi(config),
           useAgent: useAgent,
+          customSystemMessage: customSystemMessage,
         );
     }
   }
@@ -107,6 +115,7 @@ class LangchainAiRegistry {
     LangchainAiConfig config,
     BaseChatModel model, {
     required bool useAgent,
+    ChatMessage? customSystemMessage,
   }) {
     if (useAgent) {
       assert(ref != null, 'ref must be provided when useAgent is true');
@@ -125,10 +134,11 @@ class LangchainAiRegistry {
       final enabledDefs = AiToolRegistry.definitions
           .where((def) => enabledIds.contains(def.id))
           .toList(growable: false);
-      systemMessage = _buildAgentSystemMessage(
-        isReading: isReading,
-        enabledTools: enabledDefs,
-      );
+      systemMessage = customSystemMessage ??
+          _buildAgentSystemMessage(
+            isReading: isReading,
+            enabledTools: enabledDefs,
+          );
     }
 
     return LangchainPipeline(

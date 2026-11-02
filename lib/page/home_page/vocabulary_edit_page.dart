@@ -23,6 +23,7 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
   final _definitionFocus = FocusNode();
   final _mnemonicFocus = FocusNode();
   bool _saving = false;
+  bool _generatingMnemonic = false;
 
   @override
   void initState() {
@@ -163,10 +164,43 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
     }
   }
 
+  Future<void> _generateMnemonic() async {
+    final word = _word.text.trim();
+    if (word.isEmpty) {
+      AnxToast.show(L10n.of(context).vocabularyFieldRequired);
+      return;
+    }
+    setState(() => _generatingMnemonic = true);
+    try {
+      final mnemonic = await generateAssociationMnemonic(
+        word: word,
+        definition: _definition.text.trim(),
+        contextSentence: _context.text.trim(),
+        languageIsland: _island.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _mnemonic.text = mnemonic;
+      });
+      AnxToast.show('Mnemotecnia generada ✨');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.red,
+          content: Text('${L10n.of(context).commonFailed}: $e'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _generatingMnemonic = false);
+    }
+  }
+
   Widget _richField({
     required String label,
     required TextEditingController controller,
     required FocusNode focusNode,
+    Widget? trailing,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -179,6 +213,7 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
           decoration: InputDecoration(
             labelText: label,
             border: const OutlineInputBorder(),
+            suffixIcon: trailing,
           ),
         ),
         _formatBar(controller, focusNode),
@@ -236,6 +271,20 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
             label: l10n.vocabularyFieldMnemonic,
             controller: _mnemonic,
             focusNode: _mnemonicFocus,
+            trailing: _generatingMnemonic
+                ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : IconButton(
+                    tooltip: 'Generar Mnemotecnia con IA ✨',
+                    icon: const Icon(Icons.auto_awesome),
+                    onPressed: _generateMnemonic,
+                  ),
           ),
         ],
       ),

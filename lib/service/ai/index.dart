@@ -49,6 +49,7 @@ Stream<String> aiGenerateStream(
   bool regenerate = false,
   bool useAgent = false,
   WidgetRef? ref,
+  ChatMessage? customSystemMessage,
 }) {
   if (useAgent) {
     assert(ref != null, 'ref must be provided when useAgent is true');
@@ -61,6 +62,7 @@ Stream<String> aiGenerateStream(
       overrideConfig: config,
       regenerate: regenerate,
       useAgent: useAgent,
+      customSystemMessage: customSystemMessage,
       registry: registry);
 }
 
@@ -74,6 +76,7 @@ Stream<String> _generateStream({
   Map<String, String>? overrideConfig,
   required bool regenerate,
   required bool useAgent,
+  ChatMessage? customSystemMessage,
   required LangchainAiRegistry registry,
 }) async* {
   AnxLog.info('aiGenerateStream called identifier: $identifier');
@@ -106,7 +109,7 @@ Stream<String> _generateStream({
               'aiGenerateStream (new): ${provider.id}, model: ${config.model}, baseUrl: ${config.baseUrl}');
 
           final pipeline = registry.resolveByProtocol(provider.protocol, config,
-              useAgent: useAgent);
+              useAgent: useAgent, customSystemMessage: customSystemMessage);
           final model = pipeline.model;
 
           await _throttleIfNeeded();
@@ -172,7 +175,8 @@ Stream<String> _generateStream({
 
             final pipeline = registry.resolveByProtocol(
                 provider.protocol, config,
-                useAgent: useAgent);
+                useAgent: useAgent,
+                customSystemMessage: customSystemMessage);
             final model = pipeline.model;
 
             await _throttleIfNeeded();
@@ -226,7 +230,8 @@ Stream<String> _generateStream({
   AnxLog.info(
       'aiGenerateStream (legacy): $selectedIdentifier, model: ${config.model}, baseUrl: ${config.baseUrl}');
 
-  final pipeline = registry.resolve(config, useAgent: useAgent);
+  final pipeline = registry.resolve(config,
+      useAgent: useAgent, customSystemMessage: customSystemMessage);
   final model = pipeline.model;
 
   await _throttleIfNeeded();

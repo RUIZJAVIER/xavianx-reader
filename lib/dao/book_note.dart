@@ -55,6 +55,15 @@ class BookNoteDao extends BaseDao {
     );
   }
 
+  Future<List<BookNote>> selectAllBookNotes() async {
+    return queryList(
+      table,
+      mapper: BookNote.fromDb,
+      where: _typeFilter,
+      orderBy: 'update_time DESC',
+    );
+  }
+
   Future<void> updateBookNoteById(BookNote bookNote) async {
     await update(
       table,

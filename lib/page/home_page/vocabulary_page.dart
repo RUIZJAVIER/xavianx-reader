@@ -1,6 +1,8 @@
+import 'package:anx_reader/dao/book_note.dart';
 import 'package:anx_reader/dao/vocabulary.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/models/vocabulary.dart';
+import 'package:anx_reader/page/home_page/vocabulary_coach_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_deck_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_edit_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_review_page.dart';
@@ -68,6 +70,24 @@ class _VocabularyPageState extends State<VocabularyPage> {
     }
     try {
       final path = await exportVocabularyCsv(items);
+      if (path != null) {
+        AnxToast.show('${l10n.notesPageExportedTo} $path');
+      }
+    } catch (e) {
+      AnxToast.show('${l10n.commonFailed}: $e');
+    }
+  }
+
+  Future<void> _exportPkmMarkdown() async {
+    final l10n = L10n.of(context);
+    final items = await vocabularyDao.fetchAll();
+    final notes = await bookNoteDao.selectAllBookNotes();
+    if (items.isEmpty && notes.isEmpty) {
+      AnxToast.show(l10n.vocabularyExportEmpty);
+      return;
+    }
+    try {
+      final path = await exportPkmMarkdown(vocabulary: items, notes: notes);
       if (path != null) {
         AnxToast.show('${l10n.notesPageExportedTo} $path');
       }
@@ -180,6 +200,14 @@ class _VocabularyPageState extends State<VocabularyPage> {
                     },
                   ),
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'vocabulary_coach_fab',
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const VocabularyCoachPage()),
+        ),
+        icon: const Icon(Icons.psychology_alt_outlined),
+        label: const Text('Coach'),
+      ),
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.all(16),
         child: Column(
@@ -193,10 +221,24 @@ class _VocabularyPageState extends State<VocabularyPage> {
                   '${l10n.vocabularyReview} ($_due ${l10n.vocabularyReviewPending})'),
             ),
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _export,
-              icon: const Icon(Icons.upload_file),
-              label: Text(l10n.vocabularyExportToAnki),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _export,
+                    icon: const Icon(Icons.upload_file),
+                    label: Text(l10n.vocabularyExportToAnki),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _exportPkmMarkdown,
+                    icon: const Icon(Icons.description_outlined),
+                    label: const Text('Exportar .md'),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

@@ -323,6 +323,28 @@ class ExcerptMenuState extends State<ExcerptMenu> {
             icon: const Icon(Icons.translate),
             text: L10n.of(context).contextMenuTranslate,
           ),
+          // explain grammar
+          IconAndText(
+            compact: true,
+            onTap: () {
+              widget.onClose();
+              final key = readingPageKey.currentState;
+              if (key == null) return;
+              final prompt = '''Analiza gramatical y sintácticamente el siguiente fragmento:
+«${widget.annoContent.trim()}»
+
+Desglosa:
+1. Tiempos verbales y modos utilizados.
+2. Estructura sintáctica (sujeto, predicado, complementos).
+3. Puntos clave de gramática o matices idiomáticos para quien aprende el idioma.''';
+              key.showAiChat(
+                content: prompt,
+                sendImmediate: true,
+              );
+            },
+            icon: const Icon(Icons.spellcheck),
+            text: 'Explicar Gramática',
+          ),
           // narrate
           IconAndText(
             compact: true,

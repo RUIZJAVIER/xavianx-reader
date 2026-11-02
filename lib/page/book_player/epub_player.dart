@@ -35,7 +35,6 @@ import 'package:anx_reader/providers/chapter_content_bridge.dart';
 import 'package:anx_reader/providers/current_reading.dart';
 import 'package:anx_reader/service/book_player/book_player_server.dart';
 import 'package:anx_reader/providers/toc_search.dart';
-import 'package:anx_reader/service/ai/ai_vision_ocr_service.dart';
 import 'package:anx_reader/service/tts/base_tts.dart';
 import 'package:anx_reader/service/tts/models/tts_sentence.dart';
 import 'package:anx_reader/service/tts/tts_handler.dart';
@@ -47,7 +46,6 @@ import 'package:anx_reader/utils/log/common.dart';
 import 'package:anx_reader/utils/webView/epub_webview.dart';
 import 'package:anx_reader/utils/webView/epub_webview_controller.dart';
 import 'package:anx_reader/utils/webView/gererate_url.dart';
-import 'package:anx_reader/utils/webView/page_capture.dart';
 import 'package:anx_reader/utils/webView/webview_console_message.dart';
 import 'package:anx_reader/widgets/bookshelf/book_cover.dart';
 import 'package:anx_reader/widgets/context_menu/context_menu.dart';
@@ -134,19 +132,6 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   static final RegExp _pdfBookmarkCfiPattern = RegExp(r'^pdf:page=(\d+)$');
   static final RegExp _pdfNoteCfiPattern = RegExp(r'^pdf:page=(\d+):(\d+)-(\d+)$');
   static final RegExp _pdfSpineCfiPattern = RegExp(r'^epubcfi\(/6/(\d+)');
-
-  // --- AI vision OCR (scanned / photocopied PDF pages) ---
-  /// Service that turns a page screenshot into text via the user's AI config.
-  final AiVisionOcrService _visionOcr = const AiVisionOcrService();
-  /// Cache of OCR text keyed by page (so repeated AI/TTS calls reuse it).
-  final Map<String, String> _ocrTextCache = <String, String>{};
-  /// Pages whose OCR text was already handed to the TTS, to avoid loops.
-  final Set<String> _ocrServedPages = <String>{};
-  /// In-flight OCR request, so concurrent TTS/AI calls share one screenshot.
-  Future<String>? _ocrInFlight;
-  /// Minimum meaningful characters for page text to be considered readable.
-  /// Below this the page is treated as a scanned/photocopied image.
-  static const int _minReadableTextLength = 10;
 
   // Scroll wheel debounce
   Timer? _scrollDebounceTimer;
@@ -585,84 +570,6 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     webViewController.execute("clearSearch()");
   }
 
-  // --- AI vision OCR (scanned / photocopied PDF pages) -----------------------
-
-  /// Stable key identifying the currently visible page.
-  String get _currentPageKey =>
-      cfi.isNotEmpty ? cfi : '$chapterHref#$chapterCurrentPage';
-
-  /// Number of meaningful (letter/digit) characters in [text].
-  int _meaningfulLength(String text) =>
-      text.replaceAll(RegExp(r'[^\p{L}\p{N}]', unicode: true), '').length;
-
-  /// True when [text] carries no usable characters (empty or symbols only).
-  bool _isTextUnusable(String text) => _meaningfulLength(text) == 0;
-
-  /// Capture the visible page and run AI vision OCR on it.
-  ///
-  /// Results are cached per page and concurrent callers share one request.
-  Future<String> _ocrVisiblePage() {
-    final existing = _ocrInFlight;
-    if (existing != null) {
-      return existing;
-    }
-    final future = _runVisionOcr();
-    _ocrInFlight = future;
-    return future.whenComplete(() {
-      _ocrInFlight = null;
-    });
-  }
-
-  Future<String> _runVisionOcr() async {
-    final pageKey = _currentPageKey;
-    final cached = _ocrTextCache[pageKey];
-    if (cached != null) {
-      return cached;
-    }
-
-    try {
-      final Uint8List? bytes = await captureVisiblePage(webViewController);
-      if (bytes == null || bytes.isEmpty) {
-        return '';
-      }
-      final result = await _visionOcr.extractText(bytes);
-      if (!result.success || result.text.isEmpty) {
-        if (result.error != null) {
-          AnxLog.warning('Vision OCR failed: ${result.error}');
-        }
-        return '';
-      }
-      _ocrTextCache[pageKey] = result.text;
-      AnxLog.info(
-          'Vision OCR extracted ${result.text.length} chars for page $pageKey');
-      return result.text;
-    } catch (e) {
-      AnxLog.severe('Vision OCR error: $e');
-      return '';
-    }
-  }
-
-  /// Returns [jsText] unless it has no real text layer, in which case it falls
-  /// back to AI vision OCR of the visible page (served at most once per page).
-  Future<String> _ttsTextOrOcr(String jsText) async {
-    if (!_isTextUnusable(jsText)) {
-      return jsText;
-    }
-
-    final pageKey = _currentPageKey;
-    if (_ocrServedPages.contains(pageKey)) {
-      // Already narrated this scanned page; don't loop forever.
-      return jsText;
-    }
-
-    final ocrText = await _ocrVisiblePage();
-    if (ocrText.isEmpty) {
-      return jsText;
-    }
-    _ocrServedPages.add(pageKey);
-    return ocrText;
-  }
-
   Future<void> initTts({String? fromCfi}) async {
     // En PDF el CFI sintético (pdf:page=N...) no se puede resolver a un rango
     // de texto: se narra desde la posición actual del visor.
@@ -686,7 +593,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
         functionBody: "return await ttsNext()",
       ),
     );
-    return _ttsTextOrOcr(js);
+    return js;
   }
 
   Future<String> ttsPrev() async {
@@ -695,7 +602,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
         functionBody: "return await ttsPrev()",
       ),
     );
-    return _ttsTextOrOcr(js);
+    return js;
   }
 
   Future<String> ttsPrevSection() async {
@@ -704,7 +611,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
         functionBody: "return await ttsPrevSection()",
       ),
     );
-    return _ttsTextOrOcr(js);
+    return js;
   }
 
   Future<String> ttsNextSection() async {
@@ -713,13 +620,13 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
         functionBody: "return await ttsNextSection()",
       ),
     );
-    return _ttsTextOrOcr(js);
+    return js;
   }
 
   Future<String> ttsPrepare() async {
     final js =
         (await webViewController.evaluate("ttsPrepare()"))?.toString() ?? '';
-    return _ttsTextOrOcr(js);
+    return js;
   }
 
   TtsSentence? _parseTtsSentence(dynamic value) {
@@ -762,25 +669,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
       functionBody:
           'return ttsCollectDetails($count, ${includeCurrent ? 'true' : 'false'}, $offset)',
     );
-    final sentences = _parseTtsSentences(result.value);
-    if (sentences.isNotEmpty) {
-      return sentences;
-    }
-
-    // Scanned / photocopied page: the reader exposes no sentences, so fall
-    // back to AI vision OCR of the visible page (once per page).
-    final pageKey = _currentPageKey;
-    if (_ocrServedPages.contains(pageKey)) {
-      return sentences;
-    }
-    final ocrText = await _ocrVisiblePage();
-    if (ocrText.isEmpty) {
-      return sentences;
-    }
-    _ocrServedPages.add(pageKey);
-    return <TtsSentence>[
-      TtsSentence(text: ocrText, cfi: cfi.isNotEmpty ? cfi : null),
-    ];
+    return _parseTtsSentences(result.value);
   }
 
   String _jsString(EpubJavaScriptResult result) =>
@@ -815,18 +704,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
 
   Future<String> _getCurrentChapterContent({int? maxCharacters}) async {
     final raw = await theChapterContent();
-    final content = _normalizeChapterContent(raw, maxCharacters);
-    if (_meaningfulLength(content) >= _minReadableTextLength) {
-      return content;
-    }
-
-    // No usable text layer (scanned / photocopied PDF): fall back to AI vision
-    // OCR of the currently visible page so the AI assistant still gets content.
-    final ocrText = await _ocrVisiblePage();
-    if (ocrText.isEmpty) {
-      return content;
-    }
-    return _normalizeChapterContent(ocrText, maxCharacters);
+    return _normalizeChapterContent(raw, maxCharacters);
   }
 
   Future<String> _getChapterContentByHref(
@@ -1518,8 +1396,6 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   Future<void> clearPdfCache() async {
     if (!_isPdf || _pdfCacheCleared) return;
     _pdfCacheCleared = true;
-    _ocrTextCache.clear();
-    _ocrServedPages.clear();
     try {
       await webViewController.execute(
         'try { if (window.clearPdfCache) window.clearPdfCache(); if (window.book?.destroy) window.book.destroy(); } catch (_) {}',

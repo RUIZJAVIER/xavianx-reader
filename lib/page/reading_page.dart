@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
+
+import 'package:path_provider/path_provider.dart';
 
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/dao/reading_time.dart';
@@ -724,12 +727,29 @@ class ReadingPageState extends ConsumerState<ReadingPage>
     final cropped = await openScreenshotCrop(context, bytes);
     if (!mounted || cropped == null) return;
 
-    showOrHideAppBarAndBottomBar(false);
-    await showAiChat(
-      content: L10n.of(context).aiVisionAnalyzePrompt,
-      sendImmediate: true,
-      images: <Uint8List>[cropped],
-    );
+    String? tempImagePath;
+    try {
+      final tempDir = await getTemporaryDirectory();
+      tempImagePath =
+          '${tempDir.path}${Platform.pathSeparator}manual_capture_${DateTime.now().microsecondsSinceEpoch}.jpg';
+      await File(tempImagePath).writeAsBytes(cropped, flush: true);
+
+      showOrHideAppBarAndBottomBar(false);
+      await showAiChat(
+        content: L10n.of(context).aiVisionAnalyzePrompt,
+        sendImmediate: true,
+        images: <Uint8List>[cropped],
+      );
+    } finally {
+      if (tempImagePath != null) {
+        try {
+          final file = File(tempImagePath);
+          if (await file.exists()) {
+            await file.delete();
+          }
+        } catch (_) {}
+      }
+    }
   }
 
   void updateState() {

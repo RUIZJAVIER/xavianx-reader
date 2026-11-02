@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:anx_reader/config/shared_preference_provider.dart';
@@ -106,11 +107,13 @@ class AiChat extends _$AiChat {
     // Persist attached screenshots and bind them to the human message that is
     // about to be appended, so they survive history reloads. When regenerating,
     // the attachments already exist and must not be duplicated.
+    final savedPaths = <String>[];
     if (effectiveImages.isNotEmpty && !isRegenerate) {
       final saved = <AiChatAttachment>[];
       for (final bytes in effectiveImages) {
         try {
           final path = await AiVisionAttachments.save(bytes);
+          savedPaths.add(path);
           saved.add(AiChatAttachment(messageIndex: humanIndex, path: path));
         } catch (e) {
           AnxLog.warning('AiChat: failed to save screenshot attachment: $e');
@@ -197,6 +200,16 @@ class AiChat extends _$AiChat {
       );
       await historyNotifier.upsert(failedEntry);
       rethrow;
+    } finally {
+      // Blindar almacenamiento: destruir de inmediato los archivos temporales de captura
+      for (final tempImagePath in savedPaths) {
+        try {
+          final file = File(tempImagePath);
+          if (await file.exists()) {
+            await file.delete();
+          }
+        } catch (_) {}
+      }
     }
   }
 

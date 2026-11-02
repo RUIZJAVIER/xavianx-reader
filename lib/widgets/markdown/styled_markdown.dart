@@ -1,3 +1,4 @@
+import 'package:anx_reader/utils/ai_reasoning_parser.dart';
 import 'package:anx_reader/widgets/markdown/selection_control.dart';
 import 'package:flutter/material.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
@@ -18,28 +19,8 @@ class StyledMarkdown extends StatelessWidget {
     this.fontSize,
   });
 
-  static final RegExp _thinkBlockRegex =
-      RegExp(r'<think-block>.*?</think-block>', dotAll: true);
-  static final RegExp _toolStepRegex =
-      RegExp(r'<tool-step>.*?</tool-step>', dotAll: true);
-  static final RegExp _thinkRegex =
-      RegExp(r'<think>.*?</think>', dotAll: true);
-  static final RegExp _trailingThinkBlock =
-      RegExp(r'<think-block>.*$', dotAll: true);
-  static final RegExp _trailingToolStep =
-      RegExp(r'<tool-step>.*$', dotAll: true);
-  static final RegExp _trailingThink =
-      RegExp(r'<think>.*$', dotAll: true);
-
   static String stripLlmArtifacts(String input) {
-    return input
-        .replaceAll(_thinkBlockRegex, '')
-        .replaceAll(_toolStepRegex, '')
-        .replaceAll(_thinkRegex, '')
-        .replaceAll(_trailingThinkBlock, '')
-        .replaceAll(_trailingToolStep, '')
-        .replaceAll(_trailingThink, '')
-        .trim();
+    return cleanDisplayContent(input);
   }
 
   @override

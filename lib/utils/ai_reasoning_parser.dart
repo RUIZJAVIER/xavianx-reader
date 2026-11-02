@@ -183,13 +183,21 @@ String cleanDisplayContent(String raw) {
 
   // 1. Decodificar etiquetas <reply text_b64='(.*?)'.*?> si existen
   final replyRegex = RegExp(
-    r"<reply\s+[^>]*?text_b64=['\'](.*?)['\'].*?>",
+    r"<reply\s+text_b64='(.*?)'.*?>",
+    caseSensitive: false,
+    dotAll: true,
+  );
+  final replyFlexRegex = RegExp(
+    r'''<reply(?:\s+[^>]*)?\s*text_b64=['"](.*?)['"].*?>''',
     caseSensitive: false,
     dotAll: true,
   );
 
-  if (replyRegex.hasMatch(content)) {
-    content = content.replaceAllMapped(replyRegex, (match) {
+  final activeRegex =
+      replyRegex.hasMatch(content) ? replyRegex : replyFlexRegex;
+
+  if (activeRegex.hasMatch(content)) {
+    content = content.replaceAllMapped(activeRegex, (match) {
       final b64 = match.group(1);
       if (b64 == null || b64.isEmpty) return '';
       try {

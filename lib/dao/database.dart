@@ -13,7 +13,7 @@ import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 // Current app database version
-const int currentDbVersion = 10;
+const int currentDbVersion = 11;
 
 const createBookSQL = '''
 CREATE TABLE tb_books (
@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS vocabulary (
   definition TEXT,
   association_mnemonic TEXT,
   language_island TEXT,
+  tags TEXT,
   timestamp TEXT,
   efactor REAL NOT NULL DEFAULT 2.5,
   repetition INTEGER NOT NULL DEFAULT 0,
@@ -514,6 +515,13 @@ class DBHelper {
             "UPDATE vocabulary SET fsrs_state = 2, stability = MAX(interval, 1), "
             "difficulty = 5, last_review_date = next_review_date - interval * 86400000 "
             "WHERE repetition > 0 AND last_review_date IS NULL");
+        continue case11;
+      case11:
+      case 11:
+        final tagColumns = await db.rawQuery('PRAGMA table_info(vocabulary)');
+        if (!tagColumns.any((column) => column['name'] == 'tags')) {
+          await db.execute('ALTER TABLE vocabulary ADD COLUMN tags TEXT');
+        }
     }
 
     if (oldVersion != 0 && Prefs().webdavStatus) {

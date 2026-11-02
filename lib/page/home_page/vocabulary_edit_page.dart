@@ -19,6 +19,7 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
   late final TextEditingController _definition;
   late final TextEditingController _context;
   late final TextEditingController _island;
+  late final TextEditingController _tags;
   late final TextEditingController _mnemonic;
   final _definitionFocus = FocusNode();
   final _mnemonicFocus = FocusNode();
@@ -34,6 +35,7 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
     _definition = TextEditingController(text: card?.definition ?? '');
     _context = TextEditingController(text: card?.contextSentence ?? '');
     _island = TextEditingController(text: card?.languageIsland ?? '');
+    _tags = TextEditingController(text: card?.tags ?? '');
     _mnemonic = TextEditingController(text: card?.associationMnemonic ?? '');
   }
 
@@ -43,6 +45,7 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
     _definition.dispose();
     _context.dispose();
     _island.dispose();
+    _tags.dispose();
     _mnemonic.dispose();
     _definitionFocus.dispose();
     _mnemonicFocus.dispose();
@@ -125,6 +128,7 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
     setState(() => _saving = true);
 
     final mnemonic = _mnemonic.text.trim();
+    final tags = _tags.text.trim().isEmpty ? null : _tags.text.trim();
     try {
       final card = widget.card;
       if (card == null) {
@@ -134,6 +138,7 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
           contextSentence: _context.text,
           languageIsland: _island.text,
           associationMnemonic: mnemonic,
+          tags: tags,
         );
         if (!mounted) return;
         final message = result.fallbackUsed
@@ -154,6 +159,7 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
           contextSentence: _context.text.trim(),
           languageIsland: _island.text.trim(),
           associationMnemonic: mnemonic,
+          tags: tags,
         ));
       }
       if (!mounted) return;
@@ -322,6 +328,16 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
                       icon: const Icon(Icons.auto_awesome),
                       onPressed: _inferIsland,
                     ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _tags,
+            decoration: const InputDecoration(
+              labelText: 'Etiquetas (Tags)',
+              hintText: 'ej. verbo, b2, viaje',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.label_outline),
             ),
           ),
           const SizedBox(height: 12),

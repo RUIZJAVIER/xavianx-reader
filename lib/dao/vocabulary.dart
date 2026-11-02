@@ -90,6 +90,7 @@ class VocabularyDao extends BaseDao {
         'definition': card.definition,
         'association_mnemonic': card.associationMnemonic,
         'language_island': card.languageIsland,
+        'tags': card.tags,
       },
       where: 'id = ?',
       whereArgs: [card.id],
@@ -129,11 +130,13 @@ class VocabularyDao extends BaseDao {
     int id, {
     String? associationMnemonic,
     String? languageIsland,
+    String? tags,
   }) async {
     final values = <String, Object?>{
       if (associationMnemonic != null)
         'association_mnemonic': associationMnemonic,
       if (languageIsland != null) 'language_island': languageIsland,
+      if (tags != null) 'tags': tags,
     };
     if (values.isEmpty) return false;
     final updated = await update(

@@ -19,6 +19,7 @@ class VocabularyDeckPage extends StatefulWidget {
 class _VocabularyDeckPageState extends State<VocabularyDeckPage> {
   List<Vocabulary>? _items;
   int _due = 0;
+  bool _loading = false;
 
   @override
   void initState() {
@@ -27,13 +28,24 @@ class _VocabularyDeckPageState extends State<VocabularyDeckPage> {
   }
 
   Future<void> _load() async {
-    final items = await vocabularyDao.fetchAll(island: widget.island);
-    final due = await vocabularyDao.countDue(island: widget.island);
-    if (!mounted) return;
-    setState(() {
-      _items = items;
-      _due = due;
-    });
+    _loading = true;
+    try {
+      final items = await vocabularyDao.fetchAll(island: widget.island);
+      final due = await vocabularyDao.countDue(island: widget.island);
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _due = due;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _items = _items ?? const [];
+        _due = 0;
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _openEditor(Vocabulary card) async {
@@ -73,9 +85,9 @@ class _VocabularyDeckPageState extends State<VocabularyDeckPage> {
 
     return Scaffold(
       appBar: AppBar(title: Text(widget.island)),
-      body: items == null
+      body: (items == null || (_loading && items.isEmpty))
           ? const Center(child: CircularProgressIndicator())
-          : items.isEmpty
+          : (items.isEmpty && !_loading)
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32),
@@ -120,6 +132,18 @@ class _VocabularyDeckPageState extends State<VocabularyDeckPage> {
                               if (item.contextSentence.isNotEmpty)
                                 _line(Icons.format_quote,
                                     Text(item.contextSentence)),
+                              if (item.tags?.isNotEmpty ?? false)
+                                _line(
+                                  Icons.label_outline,
+                                  Text(
+                                    item.tags!,
+                                    style: TextStyle(
+                                      color:
+                                          Theme.of(context).colorScheme.primary,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ),

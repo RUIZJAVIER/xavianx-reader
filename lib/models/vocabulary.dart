@@ -30,6 +30,7 @@ class Vocabulary {
     required this.associationMnemonic,
     required this.languageIsland,
     required this.timestamp,
+    this.tags,
     this.fsrsState = 1,
     this.fsrsStep,
     this.stability,
@@ -44,6 +45,7 @@ class Vocabulary {
   final String definition;
   final String? associationMnemonic;
   final String? languageIsland;
+  final String? tags;
   final DateTime timestamp;
 
   /// FSRS scheduling state. [nextReviewDate] and [lastReviewDate] are
@@ -62,6 +64,7 @@ class Vocabulary {
       'definition': definition,
       'association_mnemonic': associationMnemonic,
       'language_island': languageIsland,
+      'tags': tags,
       'timestamp': timestamp.toIso8601String(),
       'fsrs_state': fsrsState,
       'fsrs_step': fsrsStep,
@@ -78,6 +81,7 @@ class Vocabulary {
     String? definition,
     String? associationMnemonic,
     String? languageIsland,
+    String? tags,
   }) {
     return Vocabulary(
       id: id,
@@ -86,6 +90,7 @@ class Vocabulary {
       definition: definition ?? this.definition,
       associationMnemonic: associationMnemonic ?? this.associationMnemonic,
       languageIsland: languageIsland ?? this.languageIsland,
+      tags: tags ?? this.tags,
       timestamp: timestamp,
       fsrsState: fsrsState,
       fsrsStep: fsrsStep,
@@ -104,6 +109,7 @@ class Vocabulary {
       definition: map['definition'] as String? ?? '',
       associationMnemonic: map['association_mnemonic'] as String?,
       languageIsland: map['language_island'] as String?,
+      tags: map['tags'] as String?,
       timestamp:
           DateTime.tryParse(map['timestamp'] as String? ?? '') ?? DateTime.now(),
       fsrsState: map['fsrs_state'] as int? ?? 1,

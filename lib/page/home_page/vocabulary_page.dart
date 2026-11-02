@@ -20,6 +20,7 @@ class VocabularyPage extends StatefulWidget {
 class _VocabularyPageState extends State<VocabularyPage> {
   List<VocabularyDeck>? _decks;
   int _due = 0;
+  bool _loading = false;
 
   @override
   void initState() {
@@ -28,18 +29,21 @@ class _VocabularyPageState extends State<VocabularyPage> {
   }
 
   Future<void> _load() async {
+    _loading = true;
     try {
       final decks = await vocabularyDao.fetchDecks();
       if (!mounted) return;
       setState(() {
         _decks = decks;
         _due = decks.fold(0, (sum, deck) => sum + deck.newCards + deck.due);
+        _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _decks = const [];
+        _decks = _decks ?? const [];
         _due = 0;
+        _loading = false;
       });
     }
   }
@@ -148,7 +152,7 @@ class _VocabularyPageState extends State<VocabularyPage> {
       ),
       body: RefreshIndicator(
         onRefresh: _load,
-        child: decks == null
+        child: (decks == null || (_loading && decks.isEmpty))
             ? ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 children: const [
@@ -158,7 +162,7 @@ class _VocabularyPageState extends State<VocabularyPage> {
                   ),
                 ],
               )
-            : decks.isEmpty
+            : (decks.isEmpty && !_loading)
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [

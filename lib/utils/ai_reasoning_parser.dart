@@ -77,12 +77,9 @@ class ParsedToolStep {
 
 ParsedReasoning parseReasoningContent(String content) {
   final timeline = <ParsedReasoningEntry>[];
-  // Reasoning is intentionally discarded: the UI must show only the final
-  // answer, never the model's (usually English) chain of thought.
-  final remaining = cleanDisplayContent(content);
-  if (remaining.trim().isNotEmpty) {
+  if (content.trim().isNotEmpty) {
     _parseTimeline(
-      remaining,
+      content,
       timeline,
       section: ParsedReasoningSection.answer,
     );
@@ -170,7 +167,7 @@ String composeReasoningEnvelope({
 }
 
 String chatMessageDisplayContent(ChatMessage message) {
-  return cleanDisplayContent(message.contentAsString);
+  return message.contentAsString;
 }
 
 /// Decodifica bloques `<reply text_b64='...'>` y purga cualquier remanente de máquina.
@@ -221,17 +218,15 @@ AIChatMessage assistantMessageFromDisplayContent(
   String content, {
   List<AIChatMessageToolCall> toolCalls = const [],
 }) {
-  final envelope = splitReasoningEnvelope(content);
   return AIChatMessage(
-    content: envelope.answerContent,
-    reasoningContent: envelope.reasoningContent,
+    content: content,
     toolCalls: toolCalls,
   );
 }
 
 Map<String, String> _parseAttributes(String raw) {
   final attrs = <String, String>{};
-  final attrRegex = RegExp(r"(\w+)='([^']*)'");
+  final attrRegex = RegExp(r'''(\w+)=['"]([^'"]*)['"]''');
   for (final match in attrRegex.allMatches(raw)) {
     attrs[match.group(1)!] = match.group(2)!;
   }
@@ -245,8 +240,16 @@ String? _decodeAttrValue(Map<String, String> attrs, String key) {
   }
   final encoded = attrs['${key}_b64'];
   if (encoded != null) {
-    final decoded = utf8.decode(base64Decode(_unescapeAttr(encoded)));
-    return decoded;
+    try {
+      final unescaped = _unescapeAttr(encoded);
+      return utf8.decode(base64Decode(unescaped));
+    } catch (_) {
+      try {
+        return utf8.decode(base64Decode(encoded));
+      } catch (_) {
+        return null;
+      }
+    }
   }
   return null;
 }
@@ -321,7 +324,11 @@ void _parseTimeline(
     currentIndex = match.end;
   }
 
-  final trailing = source.substring(currentIndex);
+  var trailing = source.substring(currentIndex);
+  final lastTagOpen = trailing.lastIndexOf('<');
+  if (lastTagOpen >= 0 && !trailing.substring(lastTagOpen).contains('>')) {
+    trailing = trailing.substring(0, lastTagOpen);
+  }
   if (trailing.isNotEmpty) {
     buffer.write(trailing);
   }

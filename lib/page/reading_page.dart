@@ -741,11 +741,11 @@ class ReadingPageState extends ConsumerState<ReadingPage>
         images: <Uint8List>[cropped],
       );
     } finally {
-      if (tempImagePath != null) {
+      if (tempImagePath != null && tempImagePath.isNotEmpty) {
         try {
           final file = File(tempImagePath);
-          if (await file.exists()) {
-            await file.delete();
+          if (file.existsSync()) {
+            file.deleteSync();
           }
         } catch (_) {}
       }

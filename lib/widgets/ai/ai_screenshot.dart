@@ -55,10 +55,13 @@ class AiScreenshot {
       return AiVisionSupport.prepareImageForVision(bytes);
     }
     final path = file.path;
-    if (path != null) {
+    if (path != null && path.isNotEmpty) {
       try {
-        final picked = await File(path).readAsBytes();
-        return AiVisionSupport.prepareImageForVision(picked);
+        final imageFile = File(path);
+        if (imageFile.existsSync()) {
+          final picked = await imageFile.readAsBytes();
+          return AiVisionSupport.prepareImageForVision(picked);
+        }
       } catch (_) {
         return null;
       }

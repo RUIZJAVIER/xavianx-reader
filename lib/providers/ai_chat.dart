@@ -202,13 +202,15 @@ class AiChat extends _$AiChat {
       rethrow;
     } finally {
       // Blindar almacenamiento: destruir de inmediato los archivos temporales de captura
-      for (final tempImagePath in savedPaths) {
-        try {
-          final file = File(tempImagePath);
-          if (await file.exists()) {
-            await file.delete();
-          }
-        } catch (_) {}
+      for (final String? tempImagePath in savedPaths) {
+        if (tempImagePath != null && tempImagePath.isNotEmpty) {
+          try {
+            final file = File(tempImagePath);
+            if (file.existsSync()) {
+              file.deleteSync();
+            }
+          } catch (_) {}
+        }
       }
     }
   }

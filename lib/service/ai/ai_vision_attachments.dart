@@ -50,9 +50,11 @@ class AiVisionAttachments {
 
   static Future<void> delete(String path) async {
     try {
-      final file = File(path);
-      if (await file.exists()) {
-        await file.delete();
+      if (path.isNotEmpty) {
+        final file = File(path);
+        if (file.existsSync()) {
+          file.deleteSync();
+        }
       }
     } catch (_) {
       // Best-effort cleanup.

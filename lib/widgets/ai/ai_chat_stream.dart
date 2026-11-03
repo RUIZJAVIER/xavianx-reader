@@ -1037,6 +1037,14 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                       ? StreamBuilder<List<ChatMessage>>(
                           stream: _messageStream,
                           builder: (context, snapshot) {
+                            if (snapshot.hasError) {
+                              return Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16.0),
+                                  child: Text('Error: ${snapshot.error}'),
+                                ),
+                              );
+                            }
                             if (!snapshot.hasData) {
                               return Skeletonizer.zone(child: Bone.multiText());
                             }

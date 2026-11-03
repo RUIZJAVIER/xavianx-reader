@@ -6,6 +6,7 @@ import 'package:anx_reader/providers/ai_history.dart';
 import 'package:anx_reader/service/ai/ai_history.dart';
 import 'package:anx_reader/service/ai/ai_vision_attachments.dart';
 import 'package:anx_reader/service/ai/ai_vision_chat_service.dart';
+import 'package:anx_reader/service/ai/ai_vision_support.dart';
 import 'package:anx_reader/service/ai/index.dart';
 import 'package:anx_reader/utils/ai_reasoning_parser.dart';
 import 'package:anx_reader/utils/log/common.dart';
@@ -159,16 +160,15 @@ class AiChat extends _$AiChat {
 
     String assistantResponse = "";
     try {
-      // Screenshots are sent through the multimodal path; text-only messages
-      // keep using the agent pipeline.
-      final Stream<String> responseStream = effectiveImages.isNotEmpty
-          ? _imageResponseStream(messages, effectiveImages)
-          : aiGenerateStream(
-              messages,
-              regenerate: isRegenerate,
-              useAgent: true,
-              ref: widgetRef,
-            );
+      // Direct streaming through vision/multimodal service for fast token-by-token
+      // delivery (for both text-only and screenshot messages), with clean fallback.
+      final Stream<String> responseStream = _chatResponseStream(
+        messages,
+        effectiveImages,
+        serviceId: serviceId,
+        widgetRef: widgetRef,
+        isRegenerate: isRegenerate,
+      );
 
       await for (final chunk in responseStream) {
         assistantResponse = chunk;
@@ -215,49 +215,72 @@ class AiChat extends _$AiChat {
     }
   }
 
-  /// Builds the multimodal request for a message that carries screenshots.
-  ///
-  /// The whole conversation is sent as text turns (so the model keeps context)
-  /// while the newly attached images ride along with the last user turn.
-  Stream<String> _imageResponseStream(
+  /// Unified chat stream supporting both multimodal (screenshots) and text-only
+  /// messages. Prioritizes direct streaming via AiVisionChatService for low latency,
+  /// falling back to aiGenerateStream without agent bloat when needed.
+  Stream<String> _chatResponseStream(
     List<ChatMessage> messages,
-    List<Uint8List> images,
-  ) async* {
-    final lastHumanIndex = messages.lastIndexWhere((m) => m is HumanChatMessage);
+    List<Uint8List> images, {
+    required String serviceId,
+    required WidgetRef widgetRef,
+    required bool isRegenerate,
+  }) async* {
+    final config = AiVisionSupport.resolveConfig(serviceId);
+    if (config != null) {
+      final lastHumanIndex =
+          messages.lastIndexWhere((m) => m is HumanChatMessage);
 
-    final turns = <AiVisionTurn>[];
-    for (var i = 0; i < messages.length; i++) {
-      final message = messages[i];
-      final isHuman = message is HumanChatMessage;
-      final text = _messageText(message).trim();
-      final attached =
-          i == lastHumanIndex ? images : const <Uint8List>[];
-      if (text.isEmpty && attached.isEmpty) {
-        continue;
+      final turns = <AiVisionTurn>[];
+      for (var i = 0; i < messages.length; i++) {
+        final message = messages[i];
+        final isHuman = message is HumanChatMessage;
+        final text = _messageText(message).trim();
+        final attached =
+            i == lastHumanIndex ? images : const <Uint8List>[];
+        if (text.isEmpty && attached.isEmpty) {
+          continue;
+        }
+        turns.add(
+          AiVisionTurn(
+            role: isHuman ? 'user' : 'assistant',
+            text: text,
+            images: attached,
+          ),
+        );
       }
-      turns.add(
-        AiVisionTurn(
-          role: isHuman ? 'user' : 'assistant',
-          text: text,
-          images: attached,
-        ),
-      );
+
+      var last = '';
+      try {
+        await for (final chunk in const AiVisionChatService().stream(
+          turns: turns,
+          providerId: serviceId,
+        )) {
+          last = chunk;
+          yield last;
+        }
+        if (last.isNotEmpty) {
+          return;
+        }
+        if (images.isNotEmpty) {
+          yield 'El modelo no devolvió respuesta para la imagen adjunta.';
+          return;
+        }
+      } catch (e) {
+        AnxLog.severe('Chat failed via vision service: $e');
+        if (images.isNotEmpty) {
+          yield 'Error: $e';
+          return;
+        }
+      }
     }
 
-    var last = '';
-    try {
-      await for (final chunk
-          in const AiVisionChatService().stream(turns: turns)) {
-        last = chunk;
-        yield last;
-      }
-      if (last.isEmpty) {
-        yield 'El modelo no devolvió respuesta para la imagen adjunta.';
-      }
-    } catch (e) {
-      AnxLog.severe('Vision chat failed: $e');
-      yield 'Error: $e';
-    }
+    // Fallback: direct generation without agent tool bloat
+    yield* aiGenerateStream(
+      messages,
+      regenerate: isRegenerate,
+      useAgent: false,
+      ref: widgetRef,
+    );
   }
 
   String _messageText(ChatMessage message) {

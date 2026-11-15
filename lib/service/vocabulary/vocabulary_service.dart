@@ -91,6 +91,7 @@ Future<SaveVocabularyResult> saveVocabulary({
   String? languageIsland,
   String? associationMnemonic,
   String? tags,
+  int? bookId,
 }) async {
   final trimmedIsland = languageIsland?.trim() ?? '';
   final mnemonic = associationMnemonic?.trim();
@@ -123,6 +124,7 @@ Future<SaveVocabularyResult> saveVocabulary({
           mnemonic == null || mnemonic.isEmpty ? null : mnemonic,
       languageIsland: island,
       tags: tags?.trim(),
+      bookId: bookId,
       timestamp: DateTime.now(),
       nextReviewDate: DateTime.now().millisecondsSinceEpoch,
     ),

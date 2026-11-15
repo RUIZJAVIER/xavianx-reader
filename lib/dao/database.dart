@@ -13,7 +13,7 @@ import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 // Current app database version
-const int currentDbVersion = 11;
+const int currentDbVersion = 12;
 
 const createBookSQL = '''
 CREATE TABLE tb_books (
@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS vocabulary (
   association_mnemonic TEXT,
   language_island TEXT,
   tags TEXT,
+  book_id INTEGER,
   timestamp TEXT,
   efactor REAL NOT NULL DEFAULT 2.5,
   repetition INTEGER NOT NULL DEFAULT 0,
@@ -521,6 +522,15 @@ class DBHelper {
         final tagColumns = await db.rawQuery('PRAGMA table_info(vocabulary)');
         if (!tagColumns.any((column) => column['name'] == 'tags')) {
           await db.execute('ALTER TABLE vocabulary ADD COLUMN tags TEXT');
+        }
+        continue case12;
+      case12:
+      case 12:
+        // Book the word was saved from; null for words added outside the reader.
+        final bookColumns = await db.rawQuery('PRAGMA table_info(vocabulary)');
+        if (!bookColumns.any((column) => column['name'] == 'book_id')) {
+          await db.execute(
+              'ALTER TABLE vocabulary ADD COLUMN book_id INTEGER');
         }
     }
 

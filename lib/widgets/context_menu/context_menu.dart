@@ -528,6 +528,7 @@ class _ContextMenuOverlayState extends State<_ContextMenuOverlay>
                                   annoCfi: widget.annoCfi,
                                   annoContent: widget.annoContent,
                                   id: widget.annoId,
+                                  contextText: widget.contextText,
                                   onClose: widget.onClose,
                                   footnote: widget.footnote,
                                   decoration: widget.decoration,

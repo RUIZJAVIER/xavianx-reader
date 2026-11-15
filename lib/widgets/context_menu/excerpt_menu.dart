@@ -7,6 +7,7 @@ import 'package:anx_reader/main.dart';
 import 'package:anx_reader/models/book_note.dart';
 import 'package:anx_reader/page/reading_page.dart';
 import 'package:anx_reader/service/tts/tts_handler.dart';
+import 'package:anx_reader/service/vocabulary/vocabulary_service.dart';
 import 'package:anx_reader/utils/env_var.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/widgets/book_share/excerpt_share_service.dart';
@@ -20,6 +21,7 @@ import 'package:url_launcher/url_launcher.dart';
 class ExcerptMenu extends StatefulWidget {
   final String annoCfi;
   final String annoContent;
+  final String? contextText;
   final int? id;
   final Function() onClose;
   final bool footnote;
@@ -36,6 +38,7 @@ class ExcerptMenu extends StatefulWidget {
     super.key,
     required this.annoCfi,
     required this.annoContent,
+    this.contextText,
     this.id,
     required this.onClose,
     required this.footnote,
@@ -201,6 +204,28 @@ class ExcerptMenuState extends State<ExcerptMenu> {
     }
   }
 
+  /// Guardado en un toque: palabra + frase del texto + libro, sin diálogos.
+  Future<void> _saveWordWithContext() async {
+    final sentence = widget.contextText?.trim();
+    try {
+      await saveVocabulary(
+        word: widget.annoContent,
+        definition: '',
+        contextSentence:
+            sentence == null || sentence.isEmpty ? widget.annoContent : sentence,
+        // Isla no vacía: evita la inferencia por IA y guarda al instante.
+        languageIsland: fallbackLanguageIsland,
+        bookId: epubPlayerKey.currentState?.widget.book.id,
+      );
+      if (!mounted) return;
+      AnxToast.show(L10n.of(context).vocabularySaved);
+      widget.onClose();
+    } catch (e) {
+      if (!mounted) return;
+      AnxToast.show('${L10n.of(context).commonFailed}: $e');
+    }
+  }
+
   Future<void> onTypeSelected(String type) async {
     Prefs().annotationType = type;
     if (mounted) {
@@ -322,6 +347,13 @@ class ExcerptMenuState extends State<ExcerptMenu> {
             onTap: widget.toggleTranslationMenu,
             icon: const Icon(Icons.translate),
             text: L10n.of(context).contextMenuTranslate,
+          ),
+          // Guardado rápido con la frase de contexto y el libro actual
+          IconAndText(
+            compact: true,
+            onTap: _saveWordWithContext,
+            icon: const Icon(Icons.bookmark_add_outlined),
+            text: L10n.of(context).vocabularySave,
           ),
           // explain grammar
           IconAndText(

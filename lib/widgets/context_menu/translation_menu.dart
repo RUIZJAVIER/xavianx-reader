@@ -4,6 +4,7 @@ import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/enums/lang_list.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/main.dart';
+import 'package:anx_reader/page/reading_page.dart';
 import 'package:anx_reader/service/translate/index.dart';
 import 'package:anx_reader/service/vocabulary/vocabulary_service.dart';
 import 'package:anx_reader/utils/toast/common.dart';
@@ -151,6 +152,7 @@ class _TranslationMenuState extends State<TranslationMenu> {
                 definition: definition,
                 contextSentence: widget.contextText,
                 languageIsland: islandController.text,
+                bookId: epubPlayerKey.currentState?.widget.book.id,
               );
               if (!dialogContext.mounted) return;
               Navigator.pop(dialogContext, true);

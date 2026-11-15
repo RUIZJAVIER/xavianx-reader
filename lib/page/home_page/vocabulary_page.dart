@@ -2,12 +2,12 @@ import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/dao/vocabulary.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/models/vocabulary.dart';
+import 'package:anx_reader/page/home_page/source_import_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_coach_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_deck_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_decks_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_edit_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_review_page.dart';
-import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/widgets/vocabulary/vocabulary_progress_rings.dart';
 import 'package:flutter/material.dart';
 
@@ -87,8 +87,10 @@ class _VocabularyPageState extends State<VocabularyPage> {
     Navigator.of(context).maybePop();
   }
 
-  void _comingSoon() {
-    AnxToast.show('Próximamente');
+  void _openSource(SourceKind kind) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => SourceImportPage(kind: kind)),
+    );
   }
 
   /// Opens the review session; on return the rings pick up the new FSRS data.
@@ -493,7 +495,7 @@ class _VocabularyPageState extends State<VocabularyPage> {
                 icon: Icons.play_circle_outline,
                 label: 'YouTube',
                 color: const Color(0xFFE53935),
-                onTap: _comingSoon,
+                onTap: () => _openSource(SourceKind.youtube),
               ),
             ),
             const SizedBox(width: 12),
@@ -503,7 +505,7 @@ class _VocabularyPageState extends State<VocabularyPage> {
                 icon: Icons.article_outlined,
                 label: 'Artículo',
                 color: const Color(0xFF1E88E5),
-                onTap: _comingSoon,
+                onTap: () => _openSource(SourceKind.article),
               ),
             ),
             const SizedBox(width: 12),

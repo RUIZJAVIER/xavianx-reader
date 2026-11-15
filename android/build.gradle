@@ -10,20 +10,22 @@ rootProject.layout.buildDirectory.set(rootProject.file('../build'))
 subprojects {
     project.layout.buildDirectory.set(rootProject.layout.buildDirectory.get().dir(project.name))
 }
-subprojects {
-    project.evaluationDependsOn(':app')
-}
-
 // AGP 9 validates the AAR metadata of every Android module, and several Flutter
 // plugins still pin compileSdk 33 (desktop_drop, ...), which androidx rejects
 // because it needs 34+. Compile every module against the app's SDK instead of
 // chasing a plugin release per dependency. Keep 36 in sync with app/build.gradle.
+// Must be registered before evaluationDependsOn(':app') below, which evaluates
+// :app during root evaluation and would make afterEvaluate throw.
 subprojects { subproject ->
     subproject.afterEvaluate {
         if (subproject.hasProperty('android')) {
             subproject.android.compileSdkVersion 36
         }
     }
+}
+
+subprojects {
+    project.evaluationDependsOn(':app')
 }
 
 tasks.register("clean", Delete) {

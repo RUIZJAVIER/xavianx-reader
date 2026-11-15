@@ -14,6 +14,18 @@ subprojects {
     project.evaluationDependsOn(':app')
 }
 
+// AGP 9 validates the AAR metadata of every Android module, and several Flutter
+// plugins still pin compileSdk 33 (desktop_drop, ...), which androidx rejects
+// because it needs 34+. Compile every module against the app's SDK instead of
+// chasing a plugin release per dependency. Keep 36 in sync with app/build.gradle.
+subprojects { subproject ->
+    subproject.afterEvaluate {
+        if (subproject.hasProperty('android')) {
+            subproject.android.compileSdkVersion 36
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.layout.buildDirectory.get().asFile
 }

@@ -57,7 +57,8 @@ ExtractedArticle extractArticleFromHtml(String html, {required String url}) {
         _meta(document, 'name', 'twitter:title') ??
         _firstText(document, 'article h1') ??
         _firstText(document, 'h1') ??
-        (document.title.isEmpty ? '' : document.title),
+        _firstText(document, 'title') ??
+        '',
   );
   final author = _clean(
     _meta(document, 'name', 'author') ?? (Uri.tryParse(url)?.host ?? ''),

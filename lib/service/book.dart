@@ -500,7 +500,7 @@ Future<void> resetBookCover(Book book) async {
   getBookMetadata(file);
 }
 
-Future<void> saveBook(
+Future<Book> saveBook(
   File file,
   String title,
   String author,
@@ -558,7 +558,7 @@ Future<void> saveBook(
   AnxToast.show(L10n.of(navigatorKey.currentContext!).serviceImportSuccess);
   await headlessInAppWebView?.dispose();
   headlessInAppWebView = null;
-  return;
+  return book;
 }
 
 Future<void> getBookMetadata(

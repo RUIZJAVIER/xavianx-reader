@@ -69,6 +69,7 @@ Future<File> createEpub(
     <dc:title>${_escapeXml(titleString)}</dc:title>
     <dc:creator>${_escapeXml(authorString)}</dc:creator>
     <dc:identifier id="pub-id">urn:uuid:${const Uuid().v4()}</dc:identifier>
+    <dc:language>es</dc:language>
   </metadata>
 
   <manifest>

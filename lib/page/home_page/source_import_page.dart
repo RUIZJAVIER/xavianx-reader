@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:anx_reader/main.dart';
 import 'package:anx_reader/providers/book_list.dart';
 import 'package:anx_reader/service/book.dart';
 import 'package:anx_reader/service/convert_to_epub/create_epub.dart';
@@ -120,7 +121,7 @@ class _SourceImportPageState extends ConsumerState<SourceImportPage> {
 
   /// Scientific papers are usually served as PDF, which the reader already
   /// opens natively; download it and register it as a book.
-  Future<void> _importPdf(String url) async {
+  Future<void> _importPdf(String url, {bool openNow = true}) async {
     final dio = Dio(
       BaseOptions(
         connectTimeout: const Duration(seconds: 30),
@@ -149,10 +150,14 @@ class _SourceImportPageState extends ConsumerState<SourceImportPage> {
     final file = File('${dir.path}/$title.pdf');
     await file.writeAsBytes(bytes, flush: true);
     final md5 = await MD5Service.calculateFileMd5(file.path);
-    await saveBook(file, title, uri.host, '', md5, '');
+    final savedBook = await saveBook(file, title, uri.host, '', md5, '');
     if (!mounted) return;
     ref.read(bookListProvider.notifier).refresh();
     Navigator.pop(context, true);
+    if (openNow) {
+      final targetContext = navigatorKey.currentContext ?? context;
+      await pushToReadingPage(ref, targetContext, savedBook);
+    }
   }
 
   bool _isPdfUrl(String value) {
@@ -160,7 +165,7 @@ class _SourceImportPageState extends ConsumerState<SourceImportPage> {
     return uri != null && uri.path.toLowerCase().endsWith('.pdf');
   }
 
-  Future<void> _import() async {
+  Future<void> _import({bool openNow = true}) async {
     final source = _source;
     if (source == null || _busy) return;
     setState(() {
@@ -175,10 +180,15 @@ class _SourceImportPageState extends ConsumerState<SourceImportPage> {
         source.sections,
       );
       final md5 = await MD5Service.calculateFileMd5(file.path);
-      await saveBook(file, source.title, source.author, '', md5, '');
+      final savedBook =
+          await saveBook(file, source.title, source.author, '', md5, '');
       if (!mounted) return;
       ref.read(bookListProvider.notifier).refresh();
       Navigator.pop(context, true);
+      if (openNow) {
+        final targetContext = navigatorKey.currentContext ?? context;
+        await pushToReadingPage(ref, targetContext, savedBook);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -356,10 +366,24 @@ class _SourceImportPageState extends ConsumerState<SourceImportPage> {
               ),
             ),
             const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _busy ? null : _import,
-              icon: const Icon(Icons.library_add_outlined),
-              label: const Text('Añadir a la biblioteca'),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _busy ? null : () => _import(openNow: true),
+                    icon: const Icon(Icons.chrome_reader_mode_outlined),
+                    label: const Text('Leer ahora'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _import(openNow: false),
+                    icon: const Icon(Icons.library_add_outlined),
+                    label: const Text('Solo guardar'),
+                  ),
+                ),
+              ],
             ),
           ],
         ],

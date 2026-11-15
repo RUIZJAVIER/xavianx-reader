@@ -20,6 +20,11 @@ const _userAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
+const _androidClientVersion = '20.10.38';
+const _androidUserAgent =
+    'com.google.android.youtube/$_androidClientVersion (Linux; U; Android 11) gzip';
+const _defaultInnertubeKey = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+
 final _videoId = RegExp(r'^[A-Za-z0-9_-]{11}$');
 
 /// Video id from a watch/short/embed URL or a bare 11-char id.
@@ -61,37 +66,50 @@ Future<YouTubeTranscript> fetchYouTubeTranscript(String url) async {
     BaseOptions(
       connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 60),
-      headers: {'User-Agent': _userAgent, 'Accept-Language': 'es,en;q=0.8'},
     ),
   );
 
-  // bpctr/has_verified skip the EU consent interstitial that hides captions.
-  final page = await dio.get<String>(
-    'https://www.youtube.com/watch?v=$id&hl=en&has_verified=1&bpctr=9999999999',
-    options: Options(responseType: ResponseType.plain),
-  );
-  final html = page.data ?? '';
-  var player = _playerResponse(html);
-  player ??= await _innertubePlayer(dio, html, id);
+  String? apiKey;
+  String? pageTitle;
+  String? pageAuthor;
+
+  // 1. Fetch watch page to obtain INNERTUBE_API_KEY and fallback video metadata
+  try {
+    final page = await dio.get<String>(
+      'https://www.youtube.com/watch?v=$id&hl=es',
+      options: Options(
+        responseType: ResponseType.plain,
+        headers: {
+          'User-Agent': _userAgent,
+          'Accept-Language': 'es,en;q=0.8',
+        },
+      ),
+    );
+    final html = page.data ?? '';
+    apiKey = RegExp(r'"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"')
+        .firstMatch(html)
+        ?.group(1);
+    final pagePlayer = _playerResponse(html);
+    if (pagePlayer != null && pagePlayer['videoDetails'] is Map) {
+      final details = pagePlayer['videoDetails'] as Map;
+      pageTitle = details['title'] as String?;
+      pageAuthor = details['author'] as String?;
+    }
+  } catch (e) {
+    AnxLog.warning('YouTube: watch page fetch failed: $e');
+  }
+
+  apiKey ??= _defaultInnertubeKey;
+
+  // 2. Query InnerTube API using ANDROID client to bypass web PoToken (&exp=xpe) blocking
+  final player = await _innertubePlayer(dio, apiKey, id);
   if (player == null) {
     throw const FormatException(
-      'YouTube no devolvió los datos del reproductor. Revisa la URL o '
-      'inténtalo más tarde.',
+      'YouTube no devolvió los datos del reproductor. Revisa la URL o inténtalo más tarde.',
     );
   }
 
-  var track = youTubeCaptionTrack(player);
-  if (track == null) {
-    // The watch page sometimes ships a player response without captions; the
-    // InnerTube player endpoint still returns manual and auto-generated (ASR)
-    // tracks, which is what most videos have.
-    final fallback = await _innertubePlayer(dio, html, id);
-    if (fallback != null) {
-      player = fallback;
-      track = youTubeCaptionTrack(fallback);
-    }
-  }
-
+  final track = youTubeCaptionTrack(player);
   final baseUrl = track?['baseUrl'];
   if (baseUrl is! String || baseUrl.isEmpty) {
     final status = player['playabilityStatus'];
@@ -100,18 +118,18 @@ Future<YouTubeTranscript> fetchYouTubeTranscript(String url) async {
         : null;
     throw FormatException(
       reason == null
-          ? 'Este vídeo no tiene subtítulos, ni manuales ni automáticos.'
+          ? 'Este vídeo no tiene subtítulos disponibles, ni manuales ni automáticos.'
           : 'YouTube no permite descargar este vídeo: $reason',
     );
   }
 
   final details = player['videoDetails'];
-  final title = details is Map && details['title'] is String
+  final title = (details is Map && details['title'] is String)
       ? details['title'] as String
-      : 'YouTube $id';
-  final author = details is Map && details['author'] is String
+      : (pageTitle ?? 'YouTube $id');
+  final author = (details is Map && details['author'] is String)
       ? details['author'] as String
-      : 'YouTube';
+      : (pageAuthor ?? 'YouTube');
 
   final lines = await _downloadCaptions(dio, baseUrl);
   if (lines.isEmpty) {
@@ -169,8 +187,8 @@ Map<String, dynamic>? _playerResponse(String html) {
   return null;
 }
 
-/// Caption track for [player]: a manually written one when the video has it,
-/// and the auto-generated (ASR) track otherwise.
+/// Caption track for [player]: prefers Spanish or English (manual over auto),
+/// then any manual track, then any auto track.
 Map<String, dynamic>? youTubeCaptionTrack(Map<String, dynamic> player) {
   final captions = player['captions'];
   if (captions is! Map) return null;
@@ -186,39 +204,62 @@ Map<String, dynamic>? youTubeCaptionTrack(Map<String, dynamic> player) {
       .toList();
   if (candidates.isEmpty) return null;
 
-  for (final track in candidates) {
-    if (track['kind'] != 'asr') return track;
+  bool isLang(Map<String, dynamic> track, String prefix) {
+    final lang = (track['languageCode'] as String? ?? '').toLowerCase();
+    return lang == prefix || lang.startsWith('$prefix-');
   }
+
+  // 1. Spanish manual
+  for (final t in candidates) {
+    if (t['kind'] != 'asr' && isLang(t, 'es')) return t;
+  }
+  // 2. Spanish auto
+  for (final t in candidates) {
+    if (isLang(t, 'es')) return t;
+  }
+  // 3. English manual
+  for (final t in candidates) {
+    if (t['kind'] != 'asr' && isLang(t, 'en')) return t;
+  }
+  // 4. English auto
+  for (final t in candidates) {
+    if (isLang(t, 'en')) return t;
+  }
+  // 5. Any manual
+  for (final t in candidates) {
+    if (t['kind'] != 'asr') return t;
+  }
+  // 6. First candidate
   return candidates.first;
 }
 
-/// Asks the InnerTube player endpoint for the video metadata. Unlike the watch
-/// page, it usually reports auto-generated caption tracks as well.
+/// Asks the InnerTube player endpoint for the video metadata using Android client.
+/// Bypasses the Web player's PoToken (&exp=xpe) validation.
 Future<Map<String, dynamic>?> _innertubePlayer(
   Dio dio,
-  String html,
+  String apiKey,
   String videoId,
 ) async {
-  final key =
-      RegExp(r'"INNERTUBE_API_KEY":"([^"]+)"').firstMatch(html)?.group(1);
-  if (key == null) return null;
-  final clientVersion =
-      RegExp(r'"INNERTUBE_CLIENT_VERSION":"([^"]+)"').firstMatch(html)?.group(1) ??
-          '2.20240101.00.00';
   try {
     final response = await dio.post<Map<String, dynamic>>(
-      'https://www.youtube.com/youtubei/v1/player?key=$key',
+      'https://www.youtube.com/youtubei/v1/player?key=$apiKey',
       data: {
         'context': {
           'client': {
-            'clientName': 'WEB',
-            'clientVersion': clientVersion,
-            'hl': 'en',
+            'clientName': 'ANDROID',
+            'clientVersion': _androidClientVersion,
+            'hl': 'es',
+            'gl': 'ES',
           },
         },
         'videoId': videoId,
       },
-      options: Options(contentType: Headers.jsonContentType),
+      options: Options(
+        contentType: Headers.jsonContentType,
+        headers: {
+          'User-Agent': _androidUserAgent,
+        },
+      ),
     );
     return response.data;
   } catch (e) {
@@ -227,17 +268,26 @@ Future<Map<String, dynamic>?> _innertubePlayer(
   }
 }
 
-/// Downloads the caption track as json3, falling back to the plain XML response.
+/// Downloads the caption track using Android client headers to avoid 0-byte throttling.
 Future<List<String>> _downloadCaptions(Dio dio, String baseUrl) async {
   final plain = baseUrl.replaceAll(RegExp(r'&fmt=[^&]*'), '');
-  for (final url in <String>['$plain&fmt=json3', plain]) {
+  for (final url in <String>[plain, '$plain&fmt=json3']) {
     try {
       final response = await dio.get<String>(
         url,
-        options: Options(responseType: ResponseType.plain),
+        options: Options(
+          responseType: ResponseType.plain,
+          headers: {'User-Agent': _androidUserAgent},
+        ),
       );
       final lines = _linesFromTimedText(response.data ?? '');
       if (lines.isNotEmpty) return lines;
+    } catch (e) {
+      AnxLog.warning('YouTube: caption download failed: $e');
+    }
+  }
+  return const [];
+}
     } catch (e) {
       AnxLog.warning('YouTube: caption download failed: $e');
     }

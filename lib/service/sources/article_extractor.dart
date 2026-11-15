@@ -16,6 +16,9 @@ const _contentSelectors = [
   '.article-body',
   '.post-body',
   '.markdown-body',
+  '.story-body',
+  '.content-body',
+  '#article-body',
   '#content',
   'main',
 ];
@@ -50,13 +53,31 @@ Future<ExtractedArticle> fetchArticle(String url) async {
     BaseOptions(
       connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 60),
-      headers: {'User-Agent': _userAgent, 'Accept-Language': 'es,en;q=0.8'},
+      headers: {
+        'User-Agent': _userAgent,
+        'Accept':
+            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+        'Upgrade-Insecure-Requests': '1',
+      },
     ),
   );
-  final response = await dio.get<List<int>>(
-    uri.toString(),
-    options: Options(responseType: ResponseType.bytes, followRedirects: true),
-  );
+  final Response<List<int>> response;
+  try {
+    response = await dio.get<List<int>>(
+      uri.toString(),
+      options: Options(responseType: ResponseType.bytes, followRedirects: true),
+    );
+  } on DioException catch (e) {
+    final code = e.response?.statusCode;
+    if (code == 403 || code == 401) {
+      throw const FormatException(
+        'Este sitio web está protegido contra lectores automáticos (Cloudflare/Paywall). '
+        'Copia y pega directamente el texto del artículo en esta casilla.',
+      );
+    }
+    rethrow;
+  }
   final bytes = response.data ?? const <int>[];
   if (bytes.isEmpty) {
     throw const FormatException('La página no devolvió contenido.');
@@ -68,6 +89,16 @@ Future<ExtractedArticle> fetchArticle(String url) async {
   if (html.trim().isEmpty) {
     throw const FormatException('La página no devolvió contenido.');
   }
+
+  if (html.contains('cf-browser-verification') ||
+      html.contains('Just a moment...') ||
+      html.contains('Attention Required! | Cloudflare')) {
+    throw const FormatException(
+      'Este sitio web está protegido por Cloudflare. '
+      'Copia y pega directamente el texto del artículo en esta casilla.',
+    );
+  }
+
   return extractArticleFromHtml(html, url: uri.toString());
 }
 
@@ -186,7 +217,10 @@ ExtractedArticle extractArticleFromHtml(String html, {required String url}) {
   }
 
   if (sections.isEmpty) {
-    throw const FormatException('No se encontró texto en la página.');
+    throw const FormatException(
+      'No se encontró texto legible en la página (puede ser un sitio dinámico). '
+      'Copia y pega directamente el texto del artículo en esta casilla.',
+    );
   }
 
   return ExtractedArticle(

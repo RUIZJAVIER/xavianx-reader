@@ -6,6 +6,7 @@ import 'package:anx_reader/page/home_page/vocabulary_coach_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_deck_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_decks_page.dart';
 import 'package:anx_reader/page/home_page/vocabulary_edit_page.dart';
+import 'package:anx_reader/page/home_page/vocabulary_review_page.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/widgets/vocabulary/vocabulary_progress_rings.dart';
 import 'package:flutter/material.dart';
@@ -90,10 +91,12 @@ class _VocabularyPageState extends State<VocabularyPage> {
     AnxToast.show('Próximamente');
   }
 
-  void _startSmartReview() {
-    AnxToast.show(_due > 0
-        ? 'Modo de repaso en construcción (Fase 3)'
-        : 'Estás al día');
+  /// Opens the review session; on return the rings pick up the new FSRS data.
+  Future<void> _startSmartReview() async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const VocabularyReviewPage()),
+    );
+    if (mounted) _load();
   }
 
   void _showReadingTips() {

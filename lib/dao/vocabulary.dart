@@ -60,6 +60,17 @@ class VocabularyDao extends BaseDao {
         const VocabularyProgress(reviewed: 0, recognized: 0, learned: 0);
   }
 
+  /// Random saved definitions, used as multiple-choice distractors.
+  Future<List<String>> fetchRandomDefinitions({int limit = 40}) {
+    return rawQueryList(
+      'SELECT definition FROM $table '
+      "WHERE TRIM(COALESCE(definition, '')) != '' "
+      'ORDER BY RANDOM() LIMIT ?',
+      arguments: [limit],
+      mapper: (row) => row['definition'] as String,
+    );
+  }
+
   Future<Vocabulary?> fetchById(int id) {
     return querySingle(
       table,

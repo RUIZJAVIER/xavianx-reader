@@ -133,6 +133,28 @@ Future<SaveVocabularyResult> saveVocabulary({
   return (id: id, fallbackUsed: fallbackUsed);
 }
 
+/// Shuffled multiple-choice options for every card that has a definition: the
+/// answer plus up to three distractors taken from [pool]. Cards without a
+/// definition, or with no distractors available, are left out.
+Map<int, List<String>> buildQuizChoices(
+  List<Vocabulary> cards,
+  List<String> pool,
+) {
+  final choices = <int, List<String>>{};
+  for (final card in cards) {
+    final answer = card.definition.trim();
+    if (answer.isEmpty) continue;
+    final distractors = pool
+        .map((definition) => definition.trim())
+        .where((definition) => definition.isNotEmpty && definition != answer)
+        .toSet()
+        .take(3);
+    if (distractors.isEmpty) continue;
+    choices[card.id] = <String>[answer, ...distractors]..shuffle();
+  }
+  return choices;
+}
+
 typedef FsrsUpdate = ({
   int state,
   int? step,

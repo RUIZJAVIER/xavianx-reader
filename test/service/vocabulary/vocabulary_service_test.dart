@@ -142,4 +142,42 @@ void main() {
     expect(md, contains('**Nota personal:** Releer este pasaje más adelante.'));
     expect(md, contains('Fecha: Sin fecha'));
   });
+
+  test('buildQuizChoices adds the definition and up to three distractors', () {
+    Vocabulary card(int id, String definition) => Vocabulary(
+          id: id,
+          word: 'word$id',
+          contextSentence: '',
+          definition: definition,
+          associationMnemonic: null,
+          languageIsland: null,
+          timestamp: DateTime(2026, 1, 1),
+        );
+
+    final choices = buildQuizChoices(
+      [card(1, 'puerto'), card(2, '')],
+      ['puerto', 'amanecer', 'barco', 'faro', 'faro'],
+    );
+
+    // A card without a definition cannot be quizzed.
+    expect(choices.containsKey(2), isFalse);
+    expect(choices[1], hasLength(4));
+    expect(choices[1], contains('puerto'));
+    expect(choices[1]!.toSet(), hasLength(4));
+  });
+
+  test('buildQuizChoices skips cards when there are no distractors', () {
+    final card = Vocabulary(
+      id: 1,
+      word: 'harbor',
+      contextSentence: '',
+      definition: 'puerto',
+      associationMnemonic: null,
+      languageIsland: null,
+      timestamp: DateTime(2026, 1, 1),
+    );
+
+    expect(buildQuizChoices([card], const []), isEmpty);
+    expect(buildQuizChoices([card], const ['puerto']), isEmpty);
+  });
 }

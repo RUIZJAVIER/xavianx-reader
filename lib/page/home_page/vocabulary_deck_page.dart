@@ -6,11 +6,11 @@ import 'package:anx_reader/page/home_page/vocabulary_review_page.dart';
 import 'package:anx_reader/widgets/vocabulary/vocabulary_rich_text.dart';
 import 'package:flutter/material.dart';
 
-/// Cards of a single language island.
+/// Cards of a single language island, or every card when [island] is null.
 class VocabularyDeckPage extends StatefulWidget {
-  const VocabularyDeckPage({super.key, required this.island});
+  const VocabularyDeckPage({super.key, this.island});
 
-  final String island;
+  final String? island;
 
   @override
   State<VocabularyDeckPage> createState() => _VocabularyDeckPageState();
@@ -84,7 +84,7 @@ class _VocabularyDeckPageState extends State<VocabularyDeckPage> {
     final items = _items;
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.island)),
+      appBar: AppBar(title: Text(widget.island ?? l10n.vocabularyTitle)),
       body: (items == null || (_loading && items.isEmpty))
           ? const Center(child: CircularProgressIndicator())
           : (items.isEmpty && !_loading)

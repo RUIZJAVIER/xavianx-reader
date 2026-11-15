@@ -183,6 +183,47 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
     }
   }
 
+  Future<void> _delete() async {
+    final card = widget.card;
+    if (card == null) return;
+    final l10n = L10n.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l10n.commonDelete),
+        content: Text('¿Eliminar "${card.word}" del vocabulario?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l10n.commonCancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(l10n.commonDelete),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await vocabularyDao.delete(
+        VocabularyDao.table,
+        where: 'id = ?',
+        whereArgs: [card.id],
+      );
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.red,
+          content: Text('${L10n.of(context).commonFailed}: $e'),
+        ),
+      );
+    }
+  }
+
   Future<void> _generateMnemonic() async {
     final word = _word.text.trim();
     if (word.isEmpty) {
@@ -279,6 +320,14 @@ class _VocabularyEditPageState extends State<VocabularyEditPage> {
         title: Text(widget.card == null
             ? l10n.vocabularyNewCard
             : l10n.vocabularyEditCard),
+        actions: [
+          if (widget.card != null)
+            IconButton(
+              tooltip: l10n.commonDelete,
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _saving ? null : _delete,
+            ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),

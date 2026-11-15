@@ -21,6 +21,38 @@ class VocabularyDeck {
   }
 }
 
+/// Aggregated learning progress drawn as the dashboard's three rings.
+class VocabularyProgress {
+  const VocabularyProgress({
+    required this.reviewed,
+    required this.recognized,
+    required this.learned,
+  });
+
+  /// Every saved word (outer ring).
+  final int reviewed;
+
+  /// Cards in learning/relearning, plus review cards below the learned
+  /// stability threshold (middle ring).
+  final int recognized;
+
+  /// Graduated review cards with good stability (inner ring).
+  final int learned;
+
+  /// Sweeps from outer to inner, each relative to [reviewed].
+  List<double> get ringSweeps => reviewed <= 0
+      ? const [0.0, 0.0, 0.0]
+      : [1.0, recognized / reviewed, learned / reviewed];
+
+  factory VocabularyProgress.fromDb(Map<String, dynamic> row) {
+    return VocabularyProgress(
+      reviewed: (row['reviewed'] as num?)?.toInt() ?? 0,
+      recognized: (row['recognized'] as num?)?.toInt() ?? 0,
+      learned: (row['learned'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class Vocabulary {
   const Vocabulary({
     required this.id,

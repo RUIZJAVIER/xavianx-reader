@@ -40,6 +40,26 @@ class VocabularyDao extends BaseDao {
     );
   }
 
+  /// Stability (in days) from which a graduated card counts as learned.
+  static const double learnedStabilityDays = 21;
+
+  /// Dashboard rings: total saved, in-learning, and learned cards.
+  Future<VocabularyProgress> fetchProgress() async {
+    final progress = await rawQuerySingle(
+      'SELECT COUNT(*) AS reviewed, '
+      'COALESCE(SUM(CASE WHEN fsrs_state = 3 AND COALESCE(stability, 0) >= ? '
+      'THEN 1 ELSE 0 END), 0) AS learned, '
+      'COALESCE(SUM(CASE WHEN fsrs_state IN (2, 4) '
+      'OR (fsrs_state = 3 AND COALESCE(stability, 0) < ?) '
+      'THEN 1 ELSE 0 END), 0) AS recognized '
+      'FROM $table',
+      arguments: [learnedStabilityDays, learnedStabilityDays],
+      mapper: VocabularyProgress.fromDb,
+    );
+    return progress ??
+        const VocabularyProgress(reviewed: 0, recognized: 0, learned: 0);
+  }
+
   Future<Vocabulary?> fetchById(int id) {
     return querySingle(
       table,

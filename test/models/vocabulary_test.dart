@@ -35,4 +35,20 @@ void main() {
     expect(row['book_id'], isNull);
     expect(Vocabulary.fromDb(row).bookId, isNull);
   });
+
+  test('VocabularyProgress reads the aggregate sums, NULL included', () {
+    final progress = VocabularyProgress.fromDb(
+      {'reviewed': 10, 'recognized': 4, 'learned': null},
+    );
+
+    expect(progress.reviewed, 10);
+    expect(progress.recognized, 4);
+    expect(progress.learned, 0);
+    expect(progress.ringSweeps, [1.0, 0.4, 0.0]);
+  });
+
+  test('VocabularyProgress sweeps stay at zero for an empty vocabulary', () {
+    const empty = VocabularyProgress(reviewed: 0, recognized: 0, learned: 0);
+    expect(empty.ringSweeps, [0.0, 0.0, 0.0]);
+  });
 }

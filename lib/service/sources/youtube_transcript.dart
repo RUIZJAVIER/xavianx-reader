@@ -71,11 +71,37 @@ Future<YouTubeTranscript> fetchYouTubeTranscript(String url) async {
     options: Options(responseType: ResponseType.plain),
   );
   final html = page.data ?? '';
-  final player = _playerResponse(html);
+  var player = _playerResponse(html);
+  player ??= await _innertubePlayer(dio, html, id);
   if (player == null) {
     throw const FormatException(
       'YouTube no devolvió los datos del reproductor. Revisa la URL o '
       'inténtalo más tarde.',
+    );
+  }
+
+  var track = youTubeCaptionTrack(player);
+  if (track == null) {
+    // The watch page sometimes ships a player response without captions; the
+    // InnerTube player endpoint still returns manual and auto-generated (ASR)
+    // tracks, which is what most videos have.
+    final fallback = await _innertubePlayer(dio, html, id);
+    if (fallback != null) {
+      player = fallback;
+      track = youTubeCaptionTrack(fallback);
+    }
+  }
+
+  final baseUrl = track?['baseUrl'];
+  if (baseUrl is! String || baseUrl.isEmpty) {
+    final status = player['playabilityStatus'];
+    final reason = status is Map && status['reason'] is String
+        ? status['reason'] as String
+        : null;
+    throw FormatException(
+      reason == null
+          ? 'Este vídeo no tiene subtítulos, ni manuales ni automáticos.'
+          : 'YouTube no permite descargar este vídeo: $reason',
     );
   }
 
@@ -87,27 +113,7 @@ Future<YouTubeTranscript> fetchYouTubeTranscript(String url) async {
       ? details['author'] as String
       : 'YouTube';
 
-  final track = _pickCaptionTrack(player);
-  final baseUrl = track?['baseUrl'];
-  if (baseUrl is! String || baseUrl.isEmpty) {
-    final status = player['playabilityStatus'];
-    final reason = status is Map && status['reason'] is String
-        ? status['reason'] as String
-        : null;
-    throw FormatException(
-      reason == null
-          ? 'Este vídeo no tiene subtítulos disponibles.'
-          : 'YouTube no permite descargar este vídeo: $reason',
-    );
-  }
-
-  final timedTextUrl =
-      baseUrl.contains('fmt=json3') ? baseUrl : '$baseUrl&fmt=json3';
-  final timedText = await dio.get<String>(
-    timedTextUrl,
-    options: Options(responseType: ResponseType.plain),
-  );
-  final lines = _linesFromTimedText(timedText.data ?? '');
+  final lines = await _downloadCaptions(dio, baseUrl);
   if (lines.isEmpty) {
     throw const FormatException('Los subtítulos del vídeo están vacíos.');
   }
@@ -163,8 +169,9 @@ Map<String, dynamic>? _playerResponse(String html) {
   return null;
 }
 
-/// Prefers a manually written track over the auto-generated one.
-Map<String, dynamic>? _pickCaptionTrack(Map<String, dynamic> player) {
+/// Caption track for [player]: a manually written one when the video has it,
+/// and the auto-generated (ASR) track otherwise.
+Map<String, dynamic>? youTubeCaptionTrack(Map<String, dynamic> player) {
   final captions = player['captions'];
   if (captions is! Map) return null;
   final renderer = captions['playerCaptionsTracklistRenderer'];
@@ -175,12 +182,67 @@ Map<String, dynamic>? _pickCaptionTrack(Map<String, dynamic> player) {
   final candidates = tracks
       .whereType<Map>()
       .map((track) => Map<String, dynamic>.from(track))
+      .where((track) => track['baseUrl'] is String)
       .toList();
   if (candidates.isEmpty) return null;
-  return candidates.firstWhere(
-    (track) => track['kind'] != 'asr',
-    orElse: () => candidates.first,
-  );
+
+  for (final track in candidates) {
+    if (track['kind'] != 'asr') return track;
+  }
+  return candidates.first;
+}
+
+/// Asks the InnerTube player endpoint for the video metadata. Unlike the watch
+/// page, it usually reports auto-generated caption tracks as well.
+Future<Map<String, dynamic>?> _innertubePlayer(
+  Dio dio,
+  String html,
+  String videoId,
+) async {
+  final key =
+      RegExp(r'"INNERTUBE_API_KEY":"([^"]+)"').firstMatch(html)?.group(1);
+  if (key == null) return null;
+  final clientVersion =
+      RegExp(r'"INNERTUBE_CLIENT_VERSION":"([^"]+)"').firstMatch(html)?.group(1) ??
+          '2.20240101.00.00';
+  try {
+    final response = await dio.post<Map<String, dynamic>>(
+      'https://www.youtube.com/youtubei/v1/player?key=$key',
+      data: {
+        'context': {
+          'client': {
+            'clientName': 'WEB',
+            'clientVersion': clientVersion,
+            'hl': 'en',
+          },
+        },
+        'videoId': videoId,
+      },
+      options: Options(contentType: Headers.jsonContentType),
+    );
+    return response.data;
+  } catch (e) {
+    AnxLog.warning('YouTube: innertube player failed: $e');
+    return null;
+  }
+}
+
+/// Downloads the caption track as json3, falling back to the plain XML response.
+Future<List<String>> _downloadCaptions(Dio dio, String baseUrl) async {
+  final plain = baseUrl.replaceAll(RegExp(r'&fmt=[^&]*'), '');
+  for (final url in <String>['$plain&fmt=json3', plain]) {
+    try {
+      final response = await dio.get<String>(
+        url,
+        options: Options(responseType: ResponseType.plain),
+      );
+      final lines = _linesFromTimedText(response.data ?? '');
+      if (lines.isNotEmpty) return lines;
+    } catch (e) {
+      AnxLog.warning('YouTube: caption download failed: $e');
+    }
+  }
+  return const [];
 }
 
 List<String> _linesFromTimedText(String body) {

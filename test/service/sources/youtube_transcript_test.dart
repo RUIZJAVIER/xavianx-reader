@@ -22,6 +22,35 @@ void main() {
     });
   });
 
+  group('youTubeCaptionTrack', () {
+    Map<String, dynamic> playerWith(List<Map<String, dynamic>> tracks) => {
+          'captions': {
+            'playerCaptionsTracklistRenderer': {'captionTracks': tracks},
+          },
+        };
+
+    test('detects auto-generated (ASR) tracks', () {
+      final player = playerWith([
+        {'baseUrl': 'https://x/asr', 'languageCode': 'en', 'kind': 'asr'},
+      ]);
+
+      expect(youTubeCaptionTrack(player)?['baseUrl'], 'https://x/asr');
+    });
+
+    test('prefers manual tracks over auto-generated ones', () {
+      final player = playerWith([
+        {'baseUrl': 'https://x/asr', 'languageCode': 'en', 'kind': 'asr'},
+        {'baseUrl': 'https://x/manual', 'languageCode': 'es'},
+      ]);
+
+      expect(youTubeCaptionTrack(player)?['baseUrl'], 'https://x/manual');
+    });
+
+    test('returns null when the player has no caption tracks', () {
+      expect(youTubeCaptionTrack(const {}), isNull);
+    });
+  });
+
   group('YouTubeTranscriptCleaner', () {
     test('drops timestamps, sound cues and repeated caption lines', () {
       const raw = '''

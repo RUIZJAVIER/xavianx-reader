@@ -1,7 +1,24 @@
+import 'dart:convert';
+
 import 'package:anx_reader/service/convert_to_epub/section.dart';
+import 'package:charset/charset.dart';
 import 'package:dio/dio.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
+
+/// Containers used by most blogs, news sites and journal landing pages.
+const _contentSelectors = [
+  'article',
+  '[itemprop="articleBody"]',
+  '.post-content',
+  '.entry-content',
+  '.article-content',
+  '.article-body',
+  '.post-body',
+  '.markdown-body',
+  '#content',
+  'main',
+];
 
 /// Clean article text, already split into book sections.
 class ExtractedArticle {
@@ -36,19 +53,63 @@ Future<ExtractedArticle> fetchArticle(String url) async {
       headers: {'User-Agent': _userAgent, 'Accept-Language': 'es,en;q=0.8'},
     ),
   );
-  final response = await dio.get<String>(
+  final response = await dio.get<List<int>>(
     uri.toString(),
-    options: Options(responseType: ResponseType.plain, followRedirects: true),
+    options: Options(responseType: ResponseType.bytes, followRedirects: true),
   );
-  final html = response.data ?? '';
+  final bytes = response.data ?? const <int>[];
+  if (bytes.isEmpty) {
+    throw const FormatException('La página no devolvió contenido.');
+  }
+  final html = _decodeHtml(
+    bytes,
+    response.headers.value(Headers.contentTypeHeader),
+  );
   if (html.trim().isEmpty) {
     throw const FormatException('La página no devolvió contenido.');
   }
   return extractArticleFromHtml(html, url: uri.toString());
 }
 
-/// Pulls the main article out of a page: strips chrome and scripts, picks the
-/// densest paragraph container and splits on <h2>-<h4> headings.
+/// Decodes the response using the charset from the headers or the meta tag;
+/// many blogs still serve ISO-8859-1.
+String _decodeHtml(List<int> bytes, String? contentType) {
+  final declared = RegExp(r'charset=([\w-]+)', caseSensitive: false)
+      .firstMatch(contentType ?? '')
+      ?.group(1);
+  final head = latin1.decode(
+    bytes.length > 2048 ? bytes.sublist(0, 2048) : bytes,
+    allowInvalid: true,
+  );
+  final meta = RegExp('charset=["\']?([\\w-]+)', caseSensitive: false)
+      .firstMatch(head)
+      ?.group(1);
+  final charset = (declared ?? meta ?? 'utf-8').toLowerCase();
+
+  try {
+    switch (charset) {
+      case 'iso-8859-1':
+      case 'latin1':
+      case 'windows-1252':
+        return latin1.decode(bytes);
+      case 'gbk':
+      case 'gb2312':
+        return gbk.decode(bytes);
+      case 'utf-16':
+      case 'utf16':
+        return utf16.decode(bytes);
+      default:
+        return utf8.decode(bytes, allowMalformed: true);
+    }
+  } catch (_) {
+    return utf8.decode(bytes, allowMalformed: true);
+  }
+}
+
+/// Pulls the main article out of a page: strips chrome and scripts, tries the
+/// usual blog/news/journal containers, falls back to the densest paragraph
+/// container and splits on <h2>-<h4> headings (or block text for pages that do
+/// not use <p>).
 ExtractedArticle extractArticleFromHtml(String html, {required String url}) {
   final document = html_parser.parse(html);
 
@@ -111,6 +172,19 @@ ExtractedArticle extractArticleFromHtml(String html, {required String url}) {
   }
   flush();
 
+  // Blogs without <p> (or with the text hidden in <br> blocks) need the raw
+  // block text; keep the paragraph sections when they already cover the page.
+  final collected =
+      sections.fold<int>(0, (total, section) => total + section.content.length);
+  final blockText = _blockText(root);
+  final paragraphsArePoor =
+      root.querySelectorAll('p').isEmpty || blockText.length > collected * 2;
+  if (paragraphsArePoor && blockText.length > collected) {
+    sections
+      ..clear()
+      ..add(Section('', blockText, 1));
+  }
+
   if (sections.isEmpty) {
     throw const FormatException('No se encontró texto en la página.');
   }
@@ -159,8 +233,10 @@ String? _firstText(dom.Document document, String selector) {
 }
 
 dom.Element _contentRoot(dom.Document document) {
-  final article = document.querySelector('article');
-  if (article != null && article.text.trim().length > 200) return article;
+  for (final selector in _contentSelectors) {
+    final element = document.querySelector(selector);
+    if (element != null && element.text.trim().length > 400) return element;
+  }
 
   dom.Element? best;
   var bestScore = 0;
@@ -182,4 +258,16 @@ dom.Element _contentRoot(dom.Document document) {
     throw const FormatException('La página no tiene contenido legible.');
   }
   return body;
+}
+
+/// Text for pages that use <br> or bare divs instead of <p> paragraphs.
+String _blockText(dom.Element root) {
+  final html =
+      root.innerHtml.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
+  final text = html_parser.parseFragment(html).text ?? '';
+  return text
+      .split('\n')
+      .map(_clean)
+      .where((line) => line.isNotEmpty)
+      .join('\n');
 }

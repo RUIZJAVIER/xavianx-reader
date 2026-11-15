@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:anx_reader/providers/book_list.dart';
 import 'package:anx_reader/service/book.dart';
 import 'package:anx_reader/service/convert_to_epub/create_epub.dart';
@@ -5,11 +7,16 @@ import 'package:anx_reader/service/convert_to_epub/section.dart';
 import 'package:anx_reader/service/md5_service.dart';
 import 'package:anx_reader/service/sources/article_extractor.dart';
 import 'package:anx_reader/service/sources/youtube_transcript.dart';
+import 'package:anx_reader/utils/get_path/get_temp_dir.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 enum SourceKind { youtube, article }
+
+const _userAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 class _LoadedSource {
   const _LoadedSource({
@@ -76,6 +83,9 @@ class _SourceImportPageState extends ConsumerState<SourceImportPage> {
           sections: _chunkTranscript(transcript.text),
           preview: _previewOf(transcript.text),
         );
+      } else if (_isPdfUrl(input)) {
+        await _importPdf(_looksLikeUrl(input) ? input : 'https://$input');
+        return;
       } else if (_looksLikeUrl(input) || _looksLikeBareUrl(input)) {
         final url = _looksLikeUrl(input) ? input : 'https://$input';
         final article = await fetchArticle(url);
@@ -106,6 +116,48 @@ class _SourceImportPageState extends ConsumerState<SourceImportPage> {
         _error = _describe(e);
       });
     }
+  }
+
+  /// Scientific papers are usually served as PDF, which the reader already
+  /// opens natively; download it and register it as a book.
+  Future<void> _importPdf(String url) async {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 120),
+        headers: {'User-Agent': _userAgent},
+      ),
+    );
+    final response = await dio.get<List<int>>(
+      url,
+      options: Options(responseType: ResponseType.bytes, followRedirects: true),
+    );
+    final bytes = response.data ?? const <int>[];
+    if (bytes.isEmpty) {
+      throw const FormatException('El PDF está vacío o no se pudo descargar.');
+    }
+
+    final uri = Uri.parse(url);
+    final fileName =
+        uri.pathSegments.isEmpty ? 'documento.pdf' : uri.pathSegments.last;
+    final bareName = fileName.toLowerCase().endsWith('.pdf')
+        ? fileName.substring(0, fileName.length - 4)
+        : fileName;
+    final title = _safeTitle(bareName.replaceAll(RegExp(r'[-_]+'), ' '));
+
+    final dir = await getAnxTempDir();
+    final file = File('${dir.path}/$title.pdf');
+    await file.writeAsBytes(bytes, flush: true);
+    final md5 = await MD5Service.calculateFileMd5(file.path);
+    await saveBook(file, title, uri.host, '', md5, '');
+    if (!mounted) return;
+    ref.read(bookListProvider.notifier).refresh();
+    Navigator.pop(context, true);
+  }
+
+  bool _isPdfUrl(String value) {
+    final uri = Uri.tryParse(_looksLikeUrl(value) ? value : 'https://$value');
+    return uri != null && uri.path.toLowerCase().endsWith('.pdf');
   }
 
   Future<void> _import() async {
@@ -218,11 +270,13 @@ class _SourceImportPageState extends ConsumerState<SourceImportPage> {
         children: [
           Text(
             _isYouTube
-                ? 'Pega la URL del vídeo: se descargará su transcripción, se '
-                    'limpiarán los subtítulos automáticos y quedará en tu '
-                    'biblioteca como un libro.'
-                : 'Pega la URL del artículo para extraer su texto principal, o '
-                    'pega directamente el texto que quieras leer.',
+                ? 'Pega la URL del vídeo: se descargará su transcripción '
+                    '(subtítulos manuales o autogenerados), se limpiarán los '
+                    'ruidos de los subtítulos y quedará en tu biblioteca como '
+                    'un libro.'
+                : 'Pega la URL de un artículo, blog o paper (HTML o PDF) para '
+                    'extraer su texto principal, o pega directamente el texto '
+                    'que quieras leer.',
             style: theme.textTheme.bodyMedium
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),

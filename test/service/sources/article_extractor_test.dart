@@ -41,6 +41,27 @@ void main() {
         contains('Sección uno'));
   });
 
+  test('extractArticleFromHtml falls back to <br> block text for blogs', () {
+    const blogHtml = '''
+<html><head><title>Un blog</title></head><body>
+<div class="post-content">
+  Primera línea del blog<br>
+  Segunda línea del blog<br><br>
+  Tercera línea del blog
+</div>
+</body></html>
+''';
+
+    final article = extractArticleFromHtml(
+      blogHtml,
+      url: 'https://blog.example.com/nota',
+    );
+
+    expect(article.title, 'Un blog');
+    expect(article.text, contains('Primera línea del blog'));
+    expect(article.text, contains('Tercera línea del blog'));
+  });
+
   test('articleFromText uses the first short line as title', () {
     final article = articleFromText('Título corto\n\nCuerpo del texto pegado.');
 

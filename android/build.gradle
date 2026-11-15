@@ -5,14 +5,15 @@ allprojects {
     }
 }
 
-rootProject.buildDir = '../build'
+// Gradle 9 removed Project.buildDir; the layout property keeps the same paths.
+rootProject.layout.buildDirectory.set(rootProject.file('../build'))
 subprojects {
-    project.buildDir = "${rootProject.buildDir}/${project.name}"
+    project.layout.buildDirectory.set(rootProject.layout.buildDirectory.get().dir(project.name))
 }
 subprojects {
     project.evaluationDependsOn(':app')
 }
 
 tasks.register("clean", Delete) {
-    delete rootProject.buildDir
+    delete rootProject.layout.buildDirectory.get().asFile
 }

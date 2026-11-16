@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/utils/log/common.dart';
 import 'package:dio/dio.dart';
 
@@ -23,7 +24,6 @@ const _userAgent =
 const _androidClientVersion = '20.10.38';
 const _androidUserAgent =
     'com.google.android.youtube/$_androidClientVersion (Linux; U; Android 11) gzip';
-const _defaultInnertubeKey = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
 
 final _videoId = RegExp(r'^[A-Za-z0-9_-]{11}$');
 
@@ -69,7 +69,12 @@ Future<YouTubeTranscript> fetchYouTubeTranscript(String url) async {
     ),
   );
 
-  String? apiKey;
+  // Key from the app preferences (Settings > YouTube import). When the user has
+  // not configured one, the public InnerTube key embedded in the watch page is
+  // used; nothing is hardcoded here.
+  var apiKey = Prefs().youtubeApiKey.trim();
+
+  Map<String, dynamic>? pagePlayer;
   String? pageTitle;
   String? pageAuthor;
 
@@ -86,10 +91,13 @@ Future<YouTubeTranscript> fetchYouTubeTranscript(String url) async {
       ),
     );
     final html = page.data ?? '';
-    apiKey = RegExp(r'"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"')
-        .firstMatch(html)
-        ?.group(1);
-    final pagePlayer = _playerResponse(html);
+    if (apiKey.isEmpty) {
+      apiKey = RegExp(r'"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"')
+              .firstMatch(html)
+              ?.group(1) ??
+          '';
+    }
+    pagePlayer = _playerResponse(html);
     if (pagePlayer != null && pagePlayer['videoDetails'] is Map) {
       final details = pagePlayer['videoDetails'] as Map;
       pageTitle = details['title'] as String?;
@@ -99,13 +107,17 @@ Future<YouTubeTranscript> fetchYouTubeTranscript(String url) async {
     AnxLog.warning('YouTube: watch page fetch failed: $e');
   }
 
-  apiKey ??= _defaultInnertubeKey;
-
-  // 2. Query InnerTube API using ANDROID client to bypass web PoToken (&exp=xpe) blocking
-  final player = await _innertubePlayer(dio, apiKey, id);
+  // 2. Query InnerTube API using ANDROID client to bypass web PoToken (&exp=xpe)
+  // blocking; fall back to the captions embedded in the watch page.
+  Map<String, dynamic>? player;
+  if (apiKey.isNotEmpty) {
+    player = await _innertubePlayer(dio, apiKey, id);
+  }
+  player ??= pagePlayer;
   if (player == null) {
     throw const FormatException(
-      'YouTube no devolvió los datos del reproductor. Revisa la URL o inténtalo más tarde.',
+      'YouTube no devolvió los datos del reproductor. Puedes añadir una clave '
+      'de API en el importador de YouTube o intentarlo más tarde.',
     );
   }
 
@@ -282,12 +294,6 @@ Future<List<String>> _downloadCaptions(Dio dio, String baseUrl) async {
       );
       final lines = _linesFromTimedText(response.data ?? '');
       if (lines.isNotEmpty) return lines;
-    } catch (e) {
-      AnxLog.warning('YouTube: caption download failed: $e');
-    }
-  }
-  return const [];
-}
     } catch (e) {
       AnxLog.warning('YouTube: caption download failed: $e');
     }

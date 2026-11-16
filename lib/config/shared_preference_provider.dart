@@ -1775,6 +1775,15 @@ class Prefs extends ChangeNotifier {
       selectedSearchEngineId = SearchEngine.builtinEngines.first.id;
     }
   }
+
+  String get youtubeApiKey {
+    return prefs.getString('youtubeApiKey') ?? '';
+  }
+
+  set youtubeApiKey(String key) {
+    prefs.setString('youtubeApiKey', key);
+    notifyListeners();
+  }
 }
 
 ReadingInfoEnum _decodeReadingInfoEnum(

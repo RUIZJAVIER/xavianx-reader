@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/main.dart';
 import 'package:anx_reader/providers/book_list.dart';
 import 'package:anx_reader/service/book.dart';
@@ -46,6 +47,8 @@ class SourceImportPage extends ConsumerStatefulWidget {
 
 class _SourceImportPageState extends ConsumerState<SourceImportPage> {
   final TextEditingController _controller = TextEditingController();
+  late final TextEditingController _apiKey =
+      TextEditingController(text: Prefs().youtubeApiKey);
   bool _busy = false;
   String? _error;
   _LoadedSource? _source;
@@ -55,6 +58,7 @@ class _SourceImportPageState extends ConsumerState<SourceImportPage> {
   @override
   void dispose() {
     _controller.dispose();
+    _apiKey.dispose();
     super.dispose();
   }
 
@@ -322,6 +326,29 @@ class _SourceImportPageState extends ConsumerState<SourceImportPage> {
             icon: const Icon(Icons.download_outlined),
             label: const Text('Procesar'),
           ),
+          if (_isYouTube) ...[
+            const SizedBox(height: 8),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(bottom: 8),
+              title: Text('Avanzado', style: theme.textTheme.labelLarge),
+              children: [
+                TextField(
+                  controller: _apiKey,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  onChanged: (value) => Prefs().youtubeApiKey = value.trim(),
+                  decoration: const InputDecoration(
+                    labelText: 'Clave de API de YouTube (opcional)',
+                    helperText:
+                        'Solo si YouTube bloquea la transcripción. Se guarda '
+                        'en tus preferencias, nunca en el código.',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (_busy)
             const Padding(
               padding: EdgeInsets.only(top: 16),
